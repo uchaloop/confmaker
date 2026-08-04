@@ -1,0 +1,20 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  pkg-go-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger pkg.go.dev to index the release
+        env:
+          MODULE: github.com/uchaloop/confmaker
+        run: |
+          version="${GITHUB_REF_NAME}"
+          curl -fsS "https://proxy.golang.org/${MODULE}/@v/${version}.info"
