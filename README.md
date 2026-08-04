@@ -16,7 +16,7 @@ itself - the tags it declares are inert strings only the app-level loader reads.
 ## Layering (important)
 
 The masked `Secret` type lives in the separate zero-dependency module
-[`github.com/uchaloop/secret`](https://github.com/uchaloop/secret). This keeps
+[`github.com/uchaloop/secret/v2`](https://github.com/uchaloop/secret). This keeps
 configuration types declared by libraries independent of confmaker: a library
 can expose a `secret.Secret` field without taking a dependency on the
 application-level loading stack.
@@ -25,13 +25,13 @@ The packages are layered as follows:
 
 | Package | For | Dependencies |
 |---|---|---|
-| `github.com/uchaloop/secret` | **libraries and apps** — masked secret values | standard library only; separate module |
+| `github.com/uchaloop/secret/v2` | **libraries and apps** — masked secret values | standard library only; separate module |
 | `github.com/uchaloop/confmaker/validate` | apps — error accumulator for `Validate()` | standard library only |
 | `github.com/uchaloop/confmaker` | **apps only** — TOML loader and helpers | secret, koanf, mapstructure |
 | `github.com/uchaloop/confmaker/confx` | **apps only** — Fx wiring from file and environment to typed config | confmaker, env11, fx |
 
 An infrastructure library such as a Postgres or Kafka client imports
-`github.com/uchaloop/secret` only when its config contains a secret. It does not
+`github.com/uchaloop/secret/v2` only when its config contains a secret. It does not
 need confmaker: the `koanf` and `env` struct tags it declares are inert strings.
 The application imports the root package or `confx` and is responsible for
 interpreting those tags, loading values, and validating the resulting config.
@@ -52,7 +52,7 @@ tag namespaces - `koanf` (from the file) and `env` (from the environment) - and
 
 ```go
 // declared by a library (e.g. otherlib); both tags are inert strings, so the
-// library depends only on github.com/uchaloop/secret.
+// library depends only on github.com/uchaloop/secret/v2.
 type Config struct {
 	Addr     string        `koanf:"addr" env:"ADDR"`           // file, env overrides
 	Timeout  time.Duration `koanf:"timeout"`                   // file only
@@ -107,8 +107,30 @@ fx.New(
   `[otherlib.analytics]` sub-table while also reading `[otherlib]`) makes the
   child a key of the parent, which strict decoding rejects.
 - Precedence for a field with both tags: **file first, env overrides.**
-- A secret placed in the file (`koanf:"-"`) is rejected as an unknown key.
+- A file value accidentally mapped to `secret.Secret` is ignored; secrets can
+  only be populated separately, such as from env. With `koanf:"-"`, the key is
+  excluded entirely and strict decoding rejects it as unknown.
 - `LoadModule()` with no paths reads `config.toml` from the current directory.
+
+### Configuration without a file
+
+Some configurations do not need a file or `LoadModule`. Use `ProvideNoFile` /
+`ProvideNoFileDefault` to start with the zero value of the config and fill the
+fields that declare `env` tags:
+
+```go
+fx.New(
+	confx.ProvideNoFileDefault[otherlib.Config]("otherlib"), // untagged, OTHERLIB_*
+	confx.ProvideNoFile[otherlib.Config]("analytics"),       // tagged, ANALYTICS_*
+	otherlib.Module(),
+)
+```
+
+These helpers perform no `koanf` decode and require no `Source`. Fields without
+an `env` tag remain zero-valued; choosing the tags and validating the completed
+config are the config author's responsibility. The result is validated and
+provided tagged or untagged just like `Provide` / `ProvideDefault`. No-file and
+file-backed providers can be used in the same application.
 
 ### Load open configuration (strict TOML)
 
@@ -130,17 +152,23 @@ if err := confmaker.Load(&cfg, "config/base.toml", "config/prod.toml"); err != n
 - Later files override earlier ones (base + environment overlay).
 - Decoding is **strict**: an unknown key (a typo, or a field that does not exist
   on the struct) fails instead of being silently ignored.
+- Values targeting exported `secret.Value` fields are ignored even if a `koanf` tag
+  accidentally maps them; files can never populate secrets.
 - Durations are parsed from strings such as `"30m"`; weak type coercion is off.
 
 ### Secrets
 
 The `secret.Secret` type comes from the separate zero-dependency module
-[`github.com/uchaloop/secret`](https://github.com/uchaloop/secret). It masks
+[`github.com/uchaloop/secret/v2`](https://github.com/uchaloop/secret). It masks
 itself when formatted, logged, or serialized; retrieving the real value requires
 an explicit `Reveal()` call.
 
-Secrets never live in the config file. With `confx`, an `env`-tagged field is
-filled from the environment. Without Fx, read a single secret directly:
+Secrets never come from the config file. Before file decoding, confmaker clears
+supported exported configuration values implementing `secret.Value`, regardless
+of their tags; mapped file values for those types are discarded. Unexported
+fields and map keys are outside the configuration schema and remain untouched.
+With `confx`, a secret is then filled from the environment only when it has an
+`env` tag. Without Fx, read a single secret directly:
 
 ```go
 password, err := confmaker.ResolveSecret("OTHERLIB_PASSWORD")

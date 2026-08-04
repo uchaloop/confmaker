@@ -9,7 +9,7 @@
 // struct for services that do not use Fx.
 //
 // Infrastructure libraries need only the dependency-free secret type
-// (github.com/uchaloop/secret); importing this package or confx stays optional,
+// (github.com/uchaloop/secret/v2); importing this package or confx stays optional,
 // for when a library wants more. The `koanf`/`env` tags a library declares are
 // inert strings the app-level loader reads.
 package confmaker
@@ -21,6 +21,7 @@ import (
 	"github.com/knadh/koanf/parsers/toml/v2"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+	"github.com/uchaloop/confmaker/internal/filedecode"
 )
 
 // defaultConfigPath is read when no paths are given: config.toml in the current
@@ -33,9 +34,10 @@ const defaultConfigPath = "config.toml"
 // paths, it reads config.toml from the current working directory.
 //
 // Decoding is strict: an unknown key in the file (a typo, or a field that does
-// not exist on dst) fails instead of being silently ignored. Durations are
-// parsed from strings such as "30m"; weak type coercion is disabled, so a
-// mistyped value fails rather than being guessed.
+// not exist on dst) fails instead of being silently ignored. Values targeting
+// exported secret.Value fields are ignored so a file can never populate them.
+// Durations are parsed from strings such as "30m"; weak type coercion is
+// disabled, so a mistyped value fails rather than being guessed.
 func Load(dst any, paths ...string) error {
 	if len(paths) == 0 {
 		paths = []string{defaultConfigPath}
@@ -49,6 +51,8 @@ func Load(dst any, paths ...string) error {
 		}
 	}
 
+	filedecode.ZeroSecrets(dst)
+
 	return k.UnmarshalWithConf(
 		"",
 		dst,
@@ -58,7 +62,7 @@ func Load(dst any, paths ...string) error {
 				Result:           dst,
 				ErrorUnused:      true,
 				WeaklyTypedInput: false,
-				DecodeHook:       mapstructure.StringToTimeDurationHookFunc(),
+				DecodeHook:       filedecode.Hooks(),
 			},
 		},
 	)
