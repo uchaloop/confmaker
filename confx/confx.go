@@ -13,7 +13,7 @@
 //	}
 //
 // Both tags are inert strings, so the library depends only on the secret type
-// (github.com/uchaloop/secret), not on this package. confx reads the file (koanf
+// (github.com/uchaloop/secret/v2), not on this package. confx reads the file (koanf
 // tags) and the environment (env tags) and hands the library the filled struct.
 package confx
 
@@ -26,6 +26,7 @@ import (
 	"github.com/knadh/koanf/parsers/toml/v2"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+	"github.com/uchaloop/confmaker/internal/filedecode"
 	"github.com/uchaloop/utilfx"
 	"go.uber.org/fx"
 )
@@ -73,13 +74,16 @@ func openSource(paths ...string) (*Source, error) {
 }
 
 // section decodes the sub-tree at path into dst using the `koanf:"..."` tags.
-// Decoding is strict: an unknown key (a typo, or a secret mistakenly placed in
-// the file) fails instead of being ignored.
+// Decoding is strict: unknown keys fail instead of being ignored. Existing
+// exported secret.Value fields are cleared before decoding, and mapped file
+// values targeting them are discarded.
 func (s *Source) section(path string, dst any) error {
 	sub := s.k.Cut(path)
 	if len(sub.Keys()) == 0 {
 		return fmt.Errorf("config section %q is missing or empty", path)
 	}
+
+	filedecode.ZeroSecrets(dst)
 
 	if err := sub.UnmarshalWithConf("", dst, koanf.UnmarshalConf{
 		Tag: "koanf",
@@ -87,7 +91,7 @@ func (s *Source) section(path string, dst any) error {
 			Result:           dst,
 			ErrorUnused:      true,
 			WeaklyTypedInput: false,
-			DecodeHook:       mapstructure.StringToTimeDurationHookFunc(),
+			DecodeHook:       filedecode.Hooks(),
 		},
 	}); err != nil {
 		return fmt.Errorf("decode section %q: %w", path, err)
@@ -149,9 +153,41 @@ func Provide[T any](section, name string, opts ...Option) fx.Option {
 	)
 }
 
-// build returns the constructor that decodes one section, fills env fields with
-// the given prefix, and validates the result. label names the instance in the
-// validation error.
+// ProvideNoFileDefault provides a T without loading a configuration file or
+// requiring a Source. Starting from T's zero value, it fills fields declared
+// with env tags, validates the result, and provides it untagged. Fields without
+// env tags remain zero-valued. The env prefix is derived from name
+// (WithEnvPrefix overrides it), so ProvideNoFileDefault[Config]("postgres")
+// reads POSTGRES_* variables.
+func ProvideNoFileDefault[T any](name string, opts ...Option) fx.Option {
+	set := settings{envPrefix: defaultEnvPrefix(name)}
+	for _, opt := range opts {
+		opt(&set)
+	}
+
+	return fx.Provide(buildEnv[T](set.envPrefix, name))
+}
+
+// ProvideNoFile is ProvideNoFileDefault for a named instance: it provides the
+// resulting config tagged name:"<name>" without loading a file or requiring a
+// Source.
+func ProvideNoFile[T any](name string, opts ...Option) fx.Option {
+	set := settings{envPrefix: defaultEnvPrefix(name)}
+	for _, opt := range opts {
+		opt(&set)
+	}
+
+	return fx.Provide(
+		fx.Annotate(
+			buildEnv[T](set.envPrefix, name),
+			fx.ResultTags(utilfx.NameTag(name)),
+		),
+	)
+}
+
+// build returns the constructor that decodes one section from the loaded file,
+// fills env fields with the given prefix, and validates the result. label names
+// the instance in the validation error.
 func build[T any](section, envPrefix, label string) func(*Source) (T, error) {
 	return func(src *Source) (T, error) {
 		var cfg T
@@ -159,20 +195,44 @@ func build[T any](section, envPrefix, label string) func(*Source) (T, error) {
 		if err := src.section(section, &cfg); err != nil {
 			return cfg, err
 		}
-		if err := env.ParseWithOptions(&cfg, env.Options{Prefix: envPrefix}); err != nil {
-			return cfg, cleanEnvError(err)
-		}
-		// Check &cfg, not cfg: *T's method set includes both value- and
-		// pointer-receiver Validate methods, so a library that declares Validate on
-		// a pointer receiver is still validated.
-		if v, ok := any(&cfg).(interface{ Validate() error }); ok {
-			if err := v.Validate(); err != nil {
-				return cfg, fmt.Errorf("config %q: %w", label, err)
-			}
+		if err := fillEnv(&cfg, envPrefix, label); err != nil {
+			return cfg, err
 		}
 
 		return cfg, nil
 	}
+}
+
+// buildEnv returns a constructor that starts with T's zero value and fills its
+// env-tagged fields without a file or Source dependency.
+func buildEnv[T any](envPrefix, label string) func() (T, error) {
+	return func() (T, error) {
+		var cfg T
+
+		if err := fillEnv(&cfg, envPrefix, label); err != nil {
+			return cfg, err
+		}
+
+		return cfg, nil
+	}
+}
+
+// fillEnv fills the env-tagged fields of cfg with the given prefix and validates
+// it if T has a Validate method.
+func fillEnv[T any](cfg *T, envPrefix, label string) error {
+	if err := env.ParseWithOptions(cfg, env.Options{Prefix: envPrefix}); err != nil {
+		return cleanEnvError(err)
+	}
+	// Check cfg (a *T), not *cfg: *T's method set includes both value- and
+	// pointer-receiver Validate methods, so a library that declares Validate on a
+	// pointer receiver is still validated.
+	if v, ok := any(cfg).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return fmt.Errorf("config %q: %w", label, err)
+		}
+	}
+
+	return nil
 }
 
 // defaultEnvPrefix turns an instance name into an env prefix: "main" -> "MAIN_",
@@ -193,8 +253,9 @@ func lastSegment(path string) string {
 }
 
 // cleanEnvError strips the "env: " prefix the env parser puts on its messages so
-// the error states only the problem (the caller adds package context). The env
-// parser names the missing variable, never its value.
+// the error states only the problem (the caller adds package context). Missing
+// required variables are named without a value; conversion errors for ordinary,
+// non-secret fields may include their source value.
 func cleanEnvError(err error) error {
 	return fmt.Errorf("resolve environment config: %s", strings.TrimPrefix(err.Error(), "env: "))
 }

@@ -1,9 +1,25 @@
 # Changelog
 
-All notable changes to this project are documented in this file.
+All notable changes to this module are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.2.0] - 2026-08-04
+
+### Added
+
+- `confmaker/confx`: `ProvideNoFile[T](name)` and
+  `ProvideNoFileDefault[T](name)` build a config from its zero value without a
+  file or `LoadModule`, fill its `env`-tagged fields, validate it, and provide it
+  tagged or untagged.
+- File decoding clears existing `secret.Secret` values and ignores values
+  accidentally mapped to that type, so configuration files can never populate
+  secrets.
+- Updated the secret integration to the opaque
+  `github.com/uchaloop/secret/v2` API and its sealed `secret.Value` marker.
 
 ## [0.1.0] - 2026-08-04
 
@@ -29,4 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.1.0

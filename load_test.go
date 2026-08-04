@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/uchaloop/secret/v2"
 )
 
 type serviceSection struct {
@@ -144,5 +146,58 @@ func TestLoadDefaultsToCurrentDirConfig(t *testing.T) {
 	}
 	if cfg.Service.Name != "app" {
 		t.Errorf("service.name = %q, want app (from ./config.toml)", cfg.Service.Name)
+	}
+}
+
+func TestLoadIgnoresSecretFromFile(t *testing.T) {
+	type config struct {
+		Name     string        `koanf:"name"`
+		Password secret.Secret `koanf:"password"`
+	}
+
+	path := writeTOML(t, `
+name = "app"
+password = "must-not-be-loaded"
+`)
+
+	var cfg config
+	if err := Load(&cfg, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Name != "app" {
+		t.Fatalf("name = %q, want app", cfg.Name)
+	}
+	if cfg.Password.Reveal() != "" {
+		t.Fatal("secret was populated from the configuration file")
+	}
+}
+
+func TestLoadClearsExistingSecretsEvenWhenAbsentFromFile(t *testing.T) {
+	type credentials struct {
+		Password secret.Secret `env:"PASSWORD"`
+	}
+	type service struct {
+		Credentials credentials `koanf:"credentials"`
+	}
+	type config struct {
+		Services map[string]service `koanf:"services"`
+	}
+
+	path := writeTOML(t, `
+[services.api]
+`)
+	cfg := config{
+		Services: map[string]service{
+			"api": {
+				Credentials: credentials{Password: secret.New("previous-value")},
+			},
+		},
+	}
+
+	if err := Load(&cfg, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Services["api"].Credentials.Password.Reveal(); got != "" {
+		t.Fatal("previously initialized secret was not cleared")
 	}
 }

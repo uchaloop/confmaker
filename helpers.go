@@ -5,7 +5,7 @@ import (
 	"os"
 	"slices"
 
-	"github.com/uchaloop/secret"
+	"github.com/uchaloop/secret/v2"
 )
 
 // Required returns the instance named name from a map of configured instances,
@@ -68,11 +68,11 @@ func (r *Registry[T]) Names() []string {
 func ResolveSecret(envName string) (secret.Secret, error) {
 	value, ok := os.LookupEnv(envName)
 	if !ok {
-		return "", fmt.Errorf("required secret from environment variable %q is not set", envName)
+		return secret.Secret{}, fmt.Errorf("required secret from environment variable %q is not set", envName)
 	}
 	if len(value) == 0 {
-		return "", fmt.Errorf("required secret from environment variable %q is empty", envName)
+		return secret.Secret{}, fmt.Errorf("required secret from environment variable %q is empty", envName)
 	}
 
-	return secret.Secret(value), nil
+	return secret.New(value), nil
 }

@@ -12,7 +12,7 @@ require (
 )
 
 require (
-	github.com/uchaloop/secret v1.0.0
+	github.com/uchaloop/secret/v2 v2.0.0
 	github.com/uchaloop/utilfx v0.1.0
 )
 
