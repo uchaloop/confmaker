@@ -112,6 +112,49 @@ fx.New(
   excluded entirely and strict decoding rejects it as unknown.
 - `LoadModule()` with no paths reads `config.toml` from the current directory.
 
+### Convention-based environment directories
+
+For services with a fixed deployment convention, `LoadDir` reads the required
+`ENVIRONMENT` variable and selects configuration files from one directory:
+
+```text
+config/
+├── common.toml   # optional
+├── dev.toml
+├── stage.toml
+└── prod.toml
+```
+
+```go
+fx.New(
+	confx.LoadDir("config"),
+	confx.ProvideDefault[otherlib.Config]("otherlib"),
+	otherlib.Module(),
+)
+```
+
+Accepted values are `dev`, `stage`, `prod`, and `prd`; `prd` is normalized to
+`prod` and selects `prod.toml`. The environment-specific file is required.
+`common.toml`, when present, is loaded first and the environment file overrides
+it. Field-level environment variables applied by `ProvideDefault` / `Provide`
+remain the final override:
+
+```text
+common.toml < prod.toml < field env variables
+```
+
+Without Fx, the equivalent API is:
+
+```go
+var cfg AppConfig
+if err := confmaker.LoadDir(&cfg, "config"); err != nil {
+	return err
+}
+```
+
+The directory convention is opt-in. Existing `Load` and `confx.LoadModule`
+calls keep accepting explicit paths and never require `ENVIRONMENT`.
+
 ### Configuration without a file
 
 Some configurations do not need a file or `LoadModule`. Use `ProvideNoFile` /

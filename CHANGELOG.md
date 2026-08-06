@@ -7,6 +7,15 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-06
+
+### Added
+
+- `confmaker.LoadDir` and `confmaker/confx.LoadDir` add an opt-in,
+  convention-based configuration mode. They require `ENVIRONMENT` (`dev`,
+  `stage`, `prod`, or `prd` as a `prod` alias), load optional `common.toml`
+  first, then the required canonical environment file.
+
 ## [0.2.0] - 2026-08-04
 
 ### Added
@@ -45,6 +54,7 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/uchaloop/confmaker/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.1.0

@@ -113,6 +113,59 @@ func TestProvideDefaultIsUntaggedWithSectionPrefix(t *testing.T) {
 	}
 }
 
+func TestLoadDirMergesCommonThenEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	common := `
+[widgets.alpha]
+endpoint = "common:9000"
+label = "common"
+limit = 20
+`
+	prod := `
+[widgets.alpha]
+endpoint = "prod:9000"
+`
+	if err := os.WriteFile(filepath.Join(dir, "common.toml"), []byte(common), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "prod.toml"), []byte(prod), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENVIRONMENT", "prd")
+	t.Setenv("ALPHA_TOKEN", "s3cr3t")
+
+	var got widgetConfig
+	app := fx.New(
+		fx.NopLogger,
+		LoadDir(dir),
+		ProvideDefault[widgetConfig]("widgets.alpha"),
+		fx.Invoke(func(cfg widgetConfig) { got = cfg }),
+	)
+	if app.Err() != nil {
+		t.Fatalf("app: %v", app.Err())
+	}
+	if got.Endpoint != "prod:9000" {
+		t.Fatalf("endpoint = %q, want prod overlay", got.Endpoint)
+	}
+	if got.Label != "common" || got.Limit != 20 {
+		t.Fatalf("common values lost: label=%q limit=%d", got.Label, got.Limit)
+	}
+}
+
+func TestLoadDirReportsResolutionErrorThroughFx(t *testing.T) {
+	t.Setenv("ENVIRONMENT", "stage")
+
+	app := fx.New(
+		fx.NopLogger,
+		LoadDir(t.TempDir()),
+		ProvideDefault[widgetConfig]("widgets.alpha"),
+		fx.Invoke(func(widgetConfig) {}),
+	)
+	if app.Err() == nil {
+		t.Fatal("expected an Fx build error when stage.toml is missing")
+	}
+}
+
 func TestProvideEnvOverridesFileEndpoint(t *testing.T) {
 	path := writeTOML(t)
 	t.Setenv("ALPHA_TOKEN", "s3cr3t")
