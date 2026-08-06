@@ -40,6 +40,17 @@ func writeTOML(t *testing.T, body string) string {
 	return path
 }
 
+func writeNamedTOML(t *testing.T, dir, name, body string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+
+	return path
+}
+
 func TestLoadDecodesTypesAndSections(t *testing.T) {
 	path := writeTOML(t, `
 [service]
@@ -146,6 +157,85 @@ func TestLoadDefaultsToCurrentDirConfig(t *testing.T) {
 	}
 	if cfg.Service.Name != "app" {
 		t.Errorf("service.name = %q, want app (from ./config.toml)", cfg.Service.Name)
+	}
+}
+
+func TestLoadDirMergesCommonThenEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	writeNamedTOML(t, dir, "common.toml", `
+[service]
+name = "common"
+shutdown_timeout = "5s"
+`)
+	writeNamedTOML(t, dir, "prod.toml", `
+[service]
+name = "production"
+`)
+	t.Setenv("ENVIRONMENT", "prd")
+
+	var cfg testConfig
+	if err := LoadDir(&cfg, dir); err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+	if cfg.Service.Name != "production" {
+		t.Fatalf("service.name = %q, want production", cfg.Service.Name)
+	}
+	if cfg.Service.ShutdownTimeout != 5*time.Second {
+		t.Fatalf("service.shutdown_timeout = %v, want common value 5s", cfg.Service.ShutdownTimeout)
+	}
+}
+
+func TestLoadDirWorksWithoutCommon(t *testing.T) {
+	dir := t.TempDir()
+	writeNamedTOML(t, dir, "dev.toml", `
+[service]
+name = "development"
+`)
+	t.Setenv("ENVIRONMENT", " DEV ")
+
+	var cfg testConfig
+	if err := LoadDir(&cfg, dir); err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+	if cfg.Service.Name != "development" {
+		t.Fatalf("service.name = %q, want development", cfg.Service.Name)
+	}
+}
+
+func TestLoadDirRequiresEnvironment(t *testing.T) {
+	previous, existed := os.LookupEnv("ENVIRONMENT")
+	if err := os.Unsetenv("ENVIRONMENT"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if existed {
+			_ = os.Setenv("ENVIRONMENT", previous)
+		} else {
+			_ = os.Unsetenv("ENVIRONMENT")
+		}
+	})
+
+	var cfg testConfig
+	if err := LoadDir(&cfg, t.TempDir()); err == nil {
+		t.Fatal("expected an error when ENVIRONMENT is not set")
+	}
+}
+
+func TestLoadDirRejectsUnknownEnvironment(t *testing.T) {
+	t.Setenv("ENVIRONMENT", "production")
+
+	var cfg testConfig
+	if err := LoadDir(&cfg, t.TempDir()); err == nil {
+		t.Fatal("expected an error for an unsupported ENVIRONMENT")
+	}
+}
+
+func TestLoadDirRequiresEnvironmentFile(t *testing.T) {
+	t.Setenv("ENVIRONMENT", "stage")
+
+	var cfg testConfig
+	if err := LoadDir(&cfg, t.TempDir()); err == nil {
+		t.Fatal("expected an error when stage.toml is missing")
 	}
 }
 

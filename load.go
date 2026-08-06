@@ -21,6 +21,7 @@ import (
 	"github.com/knadh/koanf/parsers/toml/v2"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+	"github.com/uchaloop/confmaker/internal/dirconfig"
 	"github.com/uchaloop/confmaker/internal/filedecode"
 )
 
@@ -66,4 +67,20 @@ func Load(dst any, paths ...string) error {
 			},
 		},
 	)
+}
+
+// LoadDir resolves configuration files from dir using the confmaker directory
+// convention and decodes their merged contents into dst.
+//
+// ENVIRONMENT is required and accepts dev, stage, prod, or prd (an alias for
+// prod). An optional common.toml is loaded first; the required canonical
+// environment file (dev.toml, stage.toml, or prod.toml) is loaded second and
+// overrides common values.
+func LoadDir(dst any, dir string) error {
+	paths, err := dirconfig.Resolve(dir)
+	if err != nil {
+		return err
+	}
+
+	return Load(dst, paths...)
 }

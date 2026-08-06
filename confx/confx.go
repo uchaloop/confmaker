@@ -26,6 +26,7 @@ import (
 	"github.com/knadh/koanf/parsers/toml/v2"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+	"github.com/uchaloop/confmaker/internal/dirconfig"
 	"github.com/uchaloop/confmaker/internal/filedecode"
 	"github.com/uchaloop/utilfx"
 	"go.uber.org/fx"
@@ -47,6 +48,29 @@ func LoadModule(paths ...string) fx.Option {
 
 		fx.Provide(
 			func() (*Source, error) {
+				return openSource(paths...)
+			},
+		),
+	)
+}
+
+// LoadDir provides a Source using the confmaker directory convention.
+//
+// ENVIRONMENT is required and accepts dev, stage, prod, or prd (an alias for
+// prod). An optional common.toml is loaded first; the required canonical
+// environment file (dev.toml, stage.toml, or prod.toml) is loaded second and
+// overrides common values. Pair it with ProvideDefault or Provide.
+func LoadDir(dir string) fx.Option {
+	return fx.Module(
+		"confmaker",
+
+		fx.Provide(
+			func() (*Source, error) {
+				paths, err := dirconfig.Resolve(dir)
+				if err != nil {
+					return nil, err
+				}
+
 				return openSource(paths...)
 			},
 		),
