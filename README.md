@@ -2,120 +2,37 @@
 
 [![CI](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/uchaloop/confmaker.svg)](https://pkg.go.dev/github.com/uchaloop/confmaker)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/github/license/uchaloop/confmaker)](LICENSE)
 
-Application-level configuration for Go services. A library declares its config as
-a plain struct with two tag namespaces - `koanf` (from the file) and `env` (from
-the environment); confmaker loads both and fills the struct, then hands it to the
-library.
+Typed configuration for Go services with strict TOML decoding, environment
+overrides, validation, and Uber Fx integration.
 
-The idea: **the service owns the config source, the libraries do not.** A library
-receives a ready-made typed `Config` and never reads files or the environment
-itself - the tags it declares are inert strings only the app-level loader reads.
-
-## Layering (important)
-
-The masked `Secret` type lives in the separate zero-dependency module
-[`github.com/uchaloop/secret/v2`](https://github.com/uchaloop/secret). This keeps
-configuration types declared by libraries independent of confmaker: a library
-can expose a `secret.Secret` field without taking a dependency on the
-application-level loading stack.
-
-The packages are layered as follows:
-
-| Package | For | Dependencies |
-|---|---|---|
-| `github.com/uchaloop/secret/v2` | **libraries and apps** — masked secret values | standard library only; separate module |
-| `github.com/uchaloop/confmaker/validate` | apps — error accumulator for `Validate()` | standard library only |
-| `github.com/uchaloop/confmaker` | **apps only** — TOML loader and helpers | secret, koanf, mapstructure |
-| `github.com/uchaloop/confmaker/confx` | **apps only** — Fx wiring from file and environment to typed config | confmaker, env11, fx |
-
-An infrastructure library such as a Postgres or Kafka client imports
-`github.com/uchaloop/secret/v2` only when its config contains a secret. It does not
-need confmaker: the `koanf` and `env` struct tags it declares are inert strings.
-The application imports the root package or `confx` and is responsible for
-interpreting those tags, loading values, and validating the resulting config.
-
-## Install
+## Installation
 
 ```bash
 go get github.com/uchaloop/confmaker
 ```
 
-## Usage
+## Configuration type
 
-### Fx wiring: one typed config per named instance (`confx`)
-
-The recommended path. A library declares its config as a plain struct with two
-tag namespaces - `koanf` (from the file) and `env` (from the environment) - and
-`confx` fills it and provides it into the container under a name tag:
+Use `koanf` tags for TOML fields and `env` tags for environment variables:
 
 ```go
-// declared by a library (e.g. otherlib); both tags are inert strings, so the
-// library depends only on github.com/uchaloop/secret/v2.
 type Config struct {
-	Addr     string        `koanf:"addr" env:"ADDR"`           // file, env overrides
-	Timeout  time.Duration `koanf:"timeout"`                   // file only
-	Password secret.Secret `koanf:"-" env:"PASSWORD,notEmpty"` // env only (present + non-empty)
+	Addr     string        `koanf:"addr" env:"ADDR"`
+	Timeout  time.Duration `koanf:"timeout"`
+	Password secret.Secret `koanf:"-" env:"PASSWORD,notEmpty"`
 }
 ```
 
-The common case is a single instance - `[otherlib]` in the file, `OTHERLIB_` in
-the environment, no tags:
+Environment variables override TOML values. A field marked with `koanf:"-"`
+cannot be populated from TOML.
 
-```toml
-# config/local.toml
-[otherlib]
-addr    = "localhost:9000"
-timeout = "5s"
-```
+## Fx
 
-```go
-fx.New(
-	confx.LoadModule("config/local.toml"),
-	confx.ProvideDefault[otherlib.Config]("otherlib"), // untagged, -> OTHERLIB_PASSWORD
-	otherlib.Module(),                                 // untagged client
-)
-```
+### Environment directory
 
-Add named instances only when a service needs a second one - each is its own
-top-level section, with its own tag and env prefix:
-
-```toml
-[otherlib]          # default instance
-addr = "localhost:9000"
-
-[analytics]         # a second instance of the same library
-addr = "analytics:9000"
-```
-
-```go
-fx.New(
-	confx.LoadModule("config/local.toml"),
-	confx.ProvideDefault[otherlib.Config]("otherlib"),        // untagged, OTHERLIB_*
-	confx.Provide[otherlib.Config]("analytics", "analytics"), // tagged, ANALYTICS_*
-)
-```
-
-- `ProvideDefault[T](section)` decodes `[section]` into a `T`, fills its `env`
-  fields, runs `T.Validate()` if present, and provides `T` **untagged**. The env
-  prefix comes from the section's last segment (`otherlib` -> `OTHERLIB_`).
-- `Provide[T](section, name)` does the same but provides `T` tagged
-  `name:"<name>"`, with the prefix derived from `name` (`analytics` ->
-  `ANALYTICS_`). Override either with `confx.WithEnvPrefix(...)`.
-- Named instances are separate top-level tables. Nesting one under another (a
-  `[otherlib.analytics]` sub-table while also reading `[otherlib]`) makes the
-  child a key of the parent, which strict decoding rejects.
-- Precedence for a field with both tags: **file first, env overrides.**
-- A file value accidentally mapped to `secret.Secret` is ignored; secrets can
-  only be populated separately, such as from env. With `koanf:"-"`, the key is
-  excluded entirely and strict decoding rejects it as unknown.
-- `LoadModule()` with no paths reads `config.toml` from the current directory.
-
-### Convention-based environment directories
-
-For services with a fixed deployment convention, `LoadDir` reads the required
-`ENVIRONMENT` variable and selects configuration files from one directory:
+For applications with environment-specific files:
 
 ```text
 config/
@@ -125,6 +42,14 @@ config/
 └── prod.toml
 ```
 
+Set the deployment environment:
+
+```bash
+ENVIRONMENT=prod
+```
+
+Then pass only the directory:
+
 ```go
 fx.New(
 	confx.LoadDir("config"),
@@ -133,17 +58,22 @@ fx.New(
 )
 ```
 
-Accepted values are `dev`, `stage`, `prod`, and `prd`; `prd` is normalized to
-`prod` and selects `prod.toml`. The environment-specific file is required.
-`common.toml`, when present, is loaded first and the environment file overrides
-it. Field-level environment variables applied by `ProvideDefault` / `Provide`
-remain the final override:
+Supported values:
+
+| `ENVIRONMENT` | File |
+|---|---|
+| `dev` | `dev.toml` |
+| `stage` | `stage.toml` |
+| `prod` | `prod.toml` |
+| `prd` | `prod.toml` |
+
+The environment file is required. When `common.toml` exists, precedence is:
 
 ```text
-common.toml < prod.toml < field env variables
+common.toml < environment file < field environment variables
 ```
 
-Without Fx, the equivalent API is:
+Without Fx:
 
 ```go
 var cfg AppConfig
@@ -152,32 +82,82 @@ if err := confmaker.LoadDir(&cfg, "config"); err != nil {
 }
 ```
 
-The directory convention is opt-in. Existing `Load` and `confx.LoadModule`
-calls keep accepting explicit paths and never require `ENVIRONMENT`.
+### Explicit files
 
-### Configuration without a file
-
-Some configurations do not need a file or `LoadModule`. Use `ProvideNoFile` /
-`ProvideNoFileDefault` to start with the zero value of the config and fill the
-fields that declare `env` tags:
+Use `LoadModule` when file paths are selected by the application:
 
 ```go
 fx.New(
-	confx.ProvideNoFileDefault[otherlib.Config]("otherlib"), // untagged, OTHERLIB_*
-	confx.ProvideNoFile[otherlib.Config]("analytics"),       // tagged, ANALYTICS_*
+	confx.LoadModule(
+		"config/common.toml",
+		"config/prod.toml",
+	),
+	confx.ProvideDefault[otherlib.Config]("otherlib"),
 	otherlib.Module(),
 )
 ```
 
-These helpers perform no `koanf` decode and require no `Source`. Fields without
-an `env` tag remain zero-valued; choosing the tags and validating the completed
-config are the config author's responsibility. The result is validated and
-provided tagged or untagged just like `Provide` / `ProvideDefault`. No-file and
-file-backed providers can be used in the same application.
+Files are applied in order; later files override earlier ones.
+`confx.LoadModule()` without arguments reads `config.toml` from the current
+directory and does not require `ENVIRONMENT`.
 
-### Load open configuration (strict TOML)
+### Default and named instances
 
-Without Fx, load a whole struct directly:
+Given:
+
+```toml
+[otherlib]
+addr = "localhost:9000"
+
+[analytics]
+addr = "analytics:9000"
+```
+
+Provide the default instance untagged and the additional instance with an Fx
+name:
+
+```go
+fx.New(
+	confx.LoadModule("config.toml"),
+	confx.ProvideDefault[otherlib.Config]("otherlib"),
+	confx.Provide[otherlib.Config]("analytics", "analytics"),
+)
+```
+
+Environment prefixes are derived from the section or instance name:
+
+```text
+OTHERLIB_ADDR
+ANALYTICS_ADDR
+```
+
+Override a prefix when needed:
+
+```go
+confx.Provide[otherlib.Config](
+	"analytics",
+	"analytics",
+	confx.WithEnvPrefix("REPORTING_"),
+)
+```
+
+### Environment-only configuration
+
+When a configuration does not need a file:
+
+```go
+fx.New(
+	confx.ProvideNoFileDefault[otherlib.Config]("otherlib"),
+	confx.ProvideNoFile[otherlib.Config]("analytics"),
+)
+```
+
+Only fields with `env` tags are populated. `ProvideNoFileDefault` provides an
+untagged value; `ProvideNoFile` provides a named value.
+
+## Without Fx
+
+Load one or more explicit TOML files:
 
 ```go
 type AppConfig struct {
@@ -186,73 +166,79 @@ type AppConfig struct {
 }
 
 var cfg AppConfig
-if err := confmaker.Load(&cfg, "config/base.toml", "config/prod.toml"); err != nil {
+if err := confmaker.Load(
+	&cfg,
+	"config/common.toml",
+	"config/prod.toml",
+); err != nil {
 	return err
 }
 ```
 
-- With no paths, `Load` reads `config.toml` from the current directory.
-- Later files override earlier ones (base + environment overlay).
-- Decoding is **strict**: an unknown key (a typo, or a field that does not exist
-  on the struct) fails instead of being silently ignored.
-- Values targeting exported `secret.Value` fields are ignored even if a `koanf` tag
-  accidentally maps them; files can never populate secrets.
-- Durations are parsed from strings such as `"30m"`; weak type coercion is off.
+`confmaker.Load(&cfg)` reads `config.toml` from the current directory.
 
-### Secrets
+Decoding is strict:
 
-The `secret.Secret` type comes from the separate zero-dependency module
-[`github.com/uchaloop/secret/v2`](https://github.com/uchaloop/secret). It masks
-itself when formatted, logged, or serialized; retrieving the real value requires
-an explicit `Reveal()` call.
+- unknown TOML keys return an error;
+- durations are accepted as strings such as `"30s"`;
+- weak type conversion is disabled.
 
-Secrets never come from the config file. Before file decoding, confmaker clears
-supported exported configuration values implementing `secret.Value`, regardless
-of their tags; mapped file values for those types are discarded. Unexported
-fields and map keys are outside the configuration schema and remain untouched.
-With `confx`, a secret is then filled from the environment only when it has an
-`env` tag. Without Fx, read a single secret directly:
+## Secrets
+
+Use [`github.com/uchaloop/secret/v2`](https://github.com/uchaloop/secret) for
+secret values:
 
 ```go
-password, err := confmaker.ResolveSecret("OTHERLIB_PASSWORD")
-// error names only the variable, never the value
-```
-
-### Named instances without Fx
-
-For a non-Fx service that loads a map of instances, pick them by name:
-
-```go
-main, err := confmaker.Required(cfg.Instances, "otherlib", "main") // mandatory
-reg := confmaker.MakeRegistry(cfg.Instances)                        // dynamic set
-inst, err := reg.Get("otherlib", name)
-```
-
-### Validate (accumulate all errors)
-
-```go
-func (c AppConfig) Validate() error {
-	var e validate.Errors
-	e.Require(c.Service.Name != "", "service.name is required")
-	// ...
-	return e.Err()
+type Config struct {
+	Password secret.Secret `koanf:"-" env:"PASSWORD,notEmpty"`
 }
 ```
 
-## Testing
+Secrets are not loaded from TOML. With `confx`, fields with `env` tags are
+populated from environment variables.
 
-```bash
-go test ./...
+Without Fx, read a required secret directly:
+
+```go
+password, err := confmaker.ResolveSecret("OTHERLIB_PASSWORD")
+```
+
+## Validation
+
+`confx` calls `Validate() error` after applying file and environment values:
+
+```go
+func (c Config) Validate() error {
+	var errors validate.Errors
+	errors.Require(c.Addr != "", "addr is required")
+	errors.Require(c.Timeout > 0, "timeout must be positive")
+
+	return errors.Err()
+}
+```
+
+## Named instances without Fx
+
+Get a required entry from a map:
+
+```go
+main, err := confmaker.Required(cfg.Instances, "otherlib", "main")
+```
+
+For names selected at runtime:
+
+```go
+registry := confmaker.MakeRegistry(cfg.Instances)
+instance, err := registry.Get("otherlib", name)
+names := registry.Names()
 ```
 
 ## Acknowledgements
 
-confmaker builds on [knadh/koanf](https://github.com/knadh/koanf),
-[go-viper/mapstructure](https://github.com/go-viper/mapstructure),
-[caarlos0/env](https://github.com/caarlos0/env) and
-[uber-go/fx](https://github.com/uber-go/fx). Thanks to their authors and
-maintainers.
+I am grateful to the authors of [Koanf](https://github.com/knadh/koanf),
+[env](https://github.com/caarlos0/env), and
+[Uber Fx](https://github.com/uber-go/fx). Their work made this library possible.
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE)

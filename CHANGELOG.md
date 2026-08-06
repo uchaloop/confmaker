@@ -7,6 +7,12 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-06
+
+### Changed
+
+- Reworked the README as concise, user-focused documentation.
+
 ## [0.3.0] - 2026-08-06
 
 ### Added
@@ -54,7 +60,8 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/uchaloop/confmaker/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/uchaloop/confmaker/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.1.0
