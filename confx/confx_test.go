@@ -2,10 +2,11 @@ package confx
 
 import (
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/uchaloop/secret/v2"
-	"github.com/uchaloop/utilfx"
 	"go.uber.org/fx"
 )
 
@@ -107,7 +108,7 @@ func TestProvideNamedTagsInstance(t *testing.T) {
 		ProvideNamed[widgetConfig]("beta"),
 		fx.Invoke(fx.Annotate(
 			func(cfg widgetConfig) { got = cfg },
-			fx.ParamTags(utilfx.NameTag("beta")),
+			fx.ParamTags(nameTag("beta")),
 		)),
 	)
 	if app.Err() != nil {
@@ -135,7 +136,7 @@ func TestProvideNamedAndDefaultCoexist(t *testing.T) {
 		ProvideNamed[widgetConfig]("replica"),
 		fx.Invoke(fx.Annotate(
 			func(m, r widgetConfig) { main, replica = m, r },
-			fx.ParamTags("", utilfx.NameTag("replica")),
+			fx.ParamTags("", nameTag("replica")),
 		)),
 	)
 	if app.Err() != nil {
@@ -311,5 +312,124 @@ func TestProvideSecretWithoutEnvTagRemainsZero(t *testing.T) {
 	}
 	if !got.WithoutEnv.IsZero() || !got.WithoutTags.IsZero() {
 		t.Fatal("Secret without an env tag was populated")
+	}
+}
+
+// defaultedConfig establishes its own defaults, so the three branches of the
+// rule are visible: unset leaves the default, set overrides it, set-empty
+// assigns the empty value.
+type defaultedConfig struct {
+	Host    string        `env:"HOST"`
+	Timeout time.Duration `env:"TIMEOUT"`
+	Retries int           `env:"RETRIES"`
+}
+
+func (c *defaultedConfig) SetDefaults() {
+	c.Host = "localhost:5432"
+	c.Timeout = 30 * time.Second
+	c.Retries = 3
+}
+
+func TestSetDefaultsSurvivesAnUnsetVariable(t *testing.T) {
+	// Nothing is set at all.
+	var cfg defaultedConfig
+	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+
+	if cfg.Host != "localhost:5432" || cfg.Timeout != 30*time.Second || cfg.Retries != 3 {
+		t.Fatalf("an unset variable overwrote its default: %+v", cfg)
+	}
+}
+
+func TestSetVariableOverridesTheDefault(t *testing.T) {
+	t.Setenv("APP_HOST", "db:5432")
+	t.Setenv("APP_RETRIES", "5")
+
+	var cfg defaultedConfig
+	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+
+	if cfg.Host != "db:5432" || cfg.Retries != 5 {
+		t.Fatalf("the environment did not override the default: %+v", cfg)
+	}
+	if cfg.Timeout != 30*time.Second {
+		t.Fatalf("an untouched field lost its default: %v", cfg.Timeout)
+	}
+}
+
+func TestEmptyVariableAssignsTheEmptyValue(t *testing.T) {
+	t.Setenv("APP_HOST", "")
+
+	var cfg defaultedConfig
+	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+
+	if len(cfg.Host) != 0 {
+		t.Fatalf("a variable set to empty kept its default: %q", cfg.Host)
+	}
+}
+
+func TestNotEmptyRejectsAnEmptyVariable(t *testing.T) {
+	type config struct {
+		Host string `env:"HOST,notEmpty"`
+	}
+
+	t.Setenv("APP_HOST", "")
+
+	var cfg config
+	err := fillEnv(&cfg, "APP_", "app")
+	if err == nil {
+		t.Fatal("an empty value passed notEmpty")
+	}
+}
+
+func TestRequiredIsAboutTheVariableNotTheValue(t *testing.T) {
+	type config struct {
+		Host string `env:"HOST,required"`
+	}
+
+	// A default does not satisfy required: the deployment still has to supply it.
+	var cfg config
+	cfg.Host = "seeded"
+
+	if err := fillEnv(&cfg, "APP_", "app"); err == nil {
+		t.Fatal("a seeded value satisfied required")
+	}
+}
+
+func TestFillReportsEveryProblemAtOnce(t *testing.T) {
+	type config struct {
+		Host    string `env:"HOST,required"`
+		Retries int    `env:"RETRIES"`
+	}
+
+	t.Setenv("APP_RETRIES", "many")
+
+	var cfg config
+	err := fillEnv(&cfg, "APP_", "app")
+	if err == nil {
+		t.Fatal("expected both problems to fail the build")
+	}
+	if !strings.Contains(err.Error(), "APP_HOST") || !strings.Contains(err.Error(), "APP_RETRIES") {
+		t.Fatalf("only one of two problems was reported: %v", err)
+	}
+}
+
+func TestParseErrorNeverEchoesASecret(t *testing.T) {
+	type config struct {
+		Count secret.Secret `env:"COUNT"`
+	}
+
+	t.Setenv("APP_COUNT", "s3cr3t")
+
+	var cfg config
+	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+		t.Fatalf("a secret decodes any text: %v", err)
+	}
+	if cfg.Count.Reveal() != "s3cr3t" {
+		t.Fatal("the secret was not decoded")
 	}
 }

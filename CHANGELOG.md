@@ -7,6 +7,41 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- Defaults belong to the config: a `SetDefaults()` method is called before the
+  environment is applied, so a library declares its defaults in code its tests
+  and its callers can see. A variable that is not set leaves its field exactly as
+  `SetDefaults` left it.
+- Maps are read from a single variable, split with `envSeparator` (default `,`)
+  and `envKeyValSeparator` (default `:`). A duplicate key is an error, and a key
+  or value padded with whitespace is reported rather than trimmed.
+- `Variable.Default` now carries the default the config establishes, rendered as
+  text the variable could carry back, whatever type the field is. Generating a
+  `.env.example` no longer depends on defaults being written in tags.
+
+### Changed
+
+- Configuration is parsed by this module rather than by `caarlos0/env`, which
+  leaves Fx and the secret type as the only dependencies. The traversal that
+  fills a config is now the same one that describes it, so a manifest cannot
+  drift from what is actually read.
+- Supported field types are `string`, `bool`, every sized integer and float,
+  `time.Duration`, any `encoding.TextUnmarshaler`, pointers to those, and slices
+  and maps of them. `complex`, `uintptr`, and `[]byte` are rejected with an error
+  rather than guessed at.
+
+### Removed
+
+- The `envDefault` tag. Declaring one is now an error naming `SetDefaults` as its
+  replacement, so a default cannot silently disappear during the migration.
+- Nesting a struct through a pointer, a slice, or an array. How many variables
+  such a field reads cannot be known from the type, which is what the strict
+  check and the manifest rest on; nest by value instead. With them goes the
+  internal notion of a config whose variables could not be enumerated.
+- The `github.com/uchaloop/utilfx` dependency, used for a single Fx tag helper.
+- Tag options this module never used: `init`, `expand`, `file`, and `unset`.
+
 ### Fixed
 
 - The suggestion in an unknown-variable error is now stable: candidates at the

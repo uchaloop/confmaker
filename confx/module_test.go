@@ -12,8 +12,13 @@ import (
 // strictConfig is the config the strict-check tests register.
 type strictConfig struct {
 	Host string        `env:"HOST"`
-	Port int           `env:"PORT" envDefault:"5432"`
+	Port int           `env:"PORT"`
 	Pass secret.Secret `env:"PASSWORD,required"`
+}
+
+// SetDefaults gives Port a default the dump can report as coming from the code.
+func (c *strictConfig) SetDefaults() {
+	c.Port = 5432
 }
 
 // runModule builds an app with Module and one postgres instance, and returns the
@@ -151,7 +156,7 @@ func TestWithDumpListsVariablesAndMasksSecrets(t *testing.T) {
 	dump := out.String()
 	for _, want := range []string{
 		"POSTGRES_HOST", "db:5432",
-		"POSTGRES_PORT", "5432", "envDefault",
+		"POSTGRES_PORT", "5432", "default",
 		"POSTGRES_PASSWORD", "(set)",
 	} {
 		if !strings.Contains(dump, want) {
@@ -211,7 +216,7 @@ func TestModuleLeavesNonStructConfigToItsConstructor(t *testing.T) {
 	}
 }
 
-func TestModuleSkipsOpenConfig(t *testing.T) {
+func TestModuleReportsAnUnreadableConfig(t *testing.T) {
 	type shard struct {
 		Host string `env:"HOST"`
 	}
@@ -220,16 +225,15 @@ func TestModuleSkipsOpenConfig(t *testing.T) {
 		Shards []shard
 	}
 
-	t.Setenv("CLUSTER_NAME", "main")
-	t.Setenv("CLUSTER_SHARDS_0_HOST", "shard-0:5432")
-
+	// A collection of structs would read variables no type can enumerate, so the
+	// declaration is refused instead of quietly leaving a hole in the check.
 	err := fx.New(
 		fx.NopLogger,
 		Module(),
 		Provide[config]("cluster"),
 		fx.Invoke(func(config) {}),
 	).Err()
-	if err != nil {
-		t.Fatalf("a config with per-element variables must not be scanned: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "nest by value") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

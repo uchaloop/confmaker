@@ -1,5 +1,3 @@
-github.com/caarlos0/env/v11 v11.4.1 h1:fYwH0sWEsBSMPG7t4e/PEfTFzrWrpjyygXyUnWiSwEw=
-github.com/caarlos0/env/v11 v11.4.1/go.mod h1:qupehSf/Y0TUTsxKywqRt/vJjN5nz6vauiYEUUr8P4U=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
@@ -10,8 +8,6 @@ github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsT
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 github.com/uchaloop/secret/v2 v2.0.0 h1:1AFtP0ETC5qr3TLPa1ra0TE0V5aiqI+990XYGKj+Ays=
 github.com/uchaloop/secret/v2 v2.0.0/go.mod h1:6WSKO6ivz7Fh0nHfVhrkC1JAgCqP8fIU23wxQ5dS6+o=
-github.com/uchaloop/utilfx v0.1.0 h1:BSmmISHSZPtdssrgfae0Ib5oSFx6WBoSbBWX7qiJ3IU=
-github.com/uchaloop/utilfx v0.1.0/go.mod h1:+vCleJim1c/6PS5W7J4Hd8/84pE5VuIVm+KvJyMVlKE=
 go.uber.org/dig v1.19.0 h1:BACLhebsYdpQ7IROQ1AGPjrXcP5dF80U3gKoFzbaq/4=
 go.uber.org/dig v1.19.0/go.mod h1:Us0rSJiThwCv2GteUN0Q7OKvU7n5J4dxZ9JKUXozFdE=
 go.uber.org/fx v1.24.0 h1:wE8mruvpg2kiiL1Vqd0CC+tr0/24XIB10Iwp2lLWzkg=

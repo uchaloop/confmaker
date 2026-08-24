@@ -15,8 +15,17 @@
 // The tags are inert strings, so the library depends only on the secret type
 // (github.com/uchaloop/secret/v2), not on this package. The instance name gives
 // the prefix, so Provide[Config]("postgres") reads POSTGRES_HOST,
-// POSTGRES_PASSWORD and so on; a field without an env tag stays at its zero
-// value, which is where a library keeps its defaults.
+// POSTGRES_PASSWORD and so on.
+//
+// A config is built in three steps, each of them optional. It establishes its
+// own defaults through a SetDefaults method, the environment overrides what it
+// sets, and a Validate method checks the result:
+//
+//	func (c *Config) SetDefaults() { c.Timeout = 30 * time.Second }
+//
+// A variable that is not set leaves its field exactly as SetDefaults left it, so
+// defaults live in the library's own code where its tests and its callers can
+// see them. A variable that is set assigns its field, an empty value included.
 package confx
 
 import (
@@ -24,8 +33,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/caarlos0/env/v11"
-	"github.com/uchaloop/utilfx"
 	"go.uber.org/fx"
 )
 
@@ -64,7 +71,7 @@ func Provide[T any](name string, opts ...Option) fx.Option {
 // replicas and shards, e.g. ProvideNamed[Config]("replica") reads variables such
 // as REPLICA_HOST.
 func ProvideNamed[T any](name string, opts ...Option) fx.Option {
-	return provide[T](name, utilfx.NameTag(name), opts)
+	return provide[T](name, nameTag(name), opts)
 }
 
 // provide registers the constructor of one instance under the given result tag -
@@ -108,24 +115,29 @@ func build[T any](prefix, label string) func() (T, error) {
 }
 
 // describe returns the constructor of one instance's manifest.
-func describe[T any](prefix, label string) func() descriptor {
-	return func() descriptor {
-		variables, open := manifest(reflect.TypeFor[T](), prefix)
-
-		return descriptor{
-			label:     label,
-			prefix:    prefix,
-			variables: variables,
-			open:      open,
+func describe[T any](prefix, label string) func() (descriptor, error) {
+	return func() (descriptor, error) {
+		variables, err := manifestOf[T](prefix)
+		if err != nil {
+			return descriptor{}, fmt.Errorf("config %q: %w", label, err)
 		}
+
+		return descriptor{label: label, prefix: prefix, variables: variables}, nil
 	}
 }
 
-// fillEnv fills the env-tagged fields of cfg with the given prefix and validates
-// it if T has a Validate method.
+// fillEnv builds cfg in three optional steps: the config establishes its own
+// defaults, the environment overrides what it sets, and the result is validated.
+// A variable that is not set leaves its field as the defaults left it.
 func fillEnv[T any](cfg *T, prefix, label string) error {
-	if err := env.ParseWithOptions(cfg, env.Options{Prefix: prefix}); err != nil {
-		return cleanEnvError(err)
+	setDefaults(cfg)
+
+	bindings, err := bind(reflect.ValueOf(cfg).Elem(), prefix)
+	if err != nil {
+		return fmt.Errorf("config %q: %w", label, err)
+	}
+	if err := apply(bindings); err != nil {
+		return fmt.Errorf("config %q: %w", label, err)
 	}
 	// Check cfg (a *T), not *cfg: *T's method set includes both value- and
 	// pointer-receiver Validate methods, so a library that declares Validate on a
@@ -145,10 +157,8 @@ func defaultPrefix(name string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(name)) + "_"
 }
 
-// cleanEnvError strips the "env: " prefix the env parser puts on its messages so
-// the error states only the problem (the caller adds package context). Missing
-// required variables are named without a value; conversion errors for ordinary,
-// non-secret fields may include their source value.
-func cleanEnvError(err error) error {
-	return fmt.Errorf("resolve environment config: %s", strings.TrimPrefix(err.Error(), "env: "))
+// nameTag is the Fx tag of a named value. %q escapes the name, so a tag stays
+// well formed whatever the instance is called.
+func nameTag(name string) string {
+	return fmt.Sprintf(`name:%q`, name)
 }

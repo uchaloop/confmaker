@@ -96,9 +96,7 @@ func checkEnvironment(descriptors []descriptor, allowed []string) error {
 	prefixes := make([]string, 0, len(descriptors))
 
 	for _, d := range descriptors {
-		// An open config reads variables the manifest cannot enumerate, so
-		// scanning its prefix would report them all as unknown.
-		if len(d.prefix) != 0 && !d.open {
+		if len(d.prefix) != 0 {
 			prefixes = append(prefixes, d.prefix)
 		}
 
@@ -229,7 +227,7 @@ func describeValue(variable Variable) (value, source string) {
 	}
 
 	if variable.HasDefault {
-		return variable.Default, "envDefault"
+		return variable.Default, "default"
 	}
 
 	if variable.Required {
