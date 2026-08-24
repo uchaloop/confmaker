@@ -10,18 +10,25 @@ import (
 )
 
 // parseInto assigns raw to a fresh T and returns it, so a case reads as
-// "this text becomes this value".
+// "this text becomes this value". A type that cannot be read at all is reported
+// by the same call, because the parser is chosen from the type before any value
+// is seen.
 func parseInto[T any](t *testing.T, raw string) (T, error) {
 	t.Helper()
 
 	var target T
 
-	err := setField(reflect.ValueOf(&target).Elem(), raw, defaultSeparator, defaultKeyValSeparator)
+	parse, err := fieldParser(reflect.TypeFor[T](), defaultSeparator, defaultKeyValSeparator)
+	if err != nil {
+		return target, err
+	}
+
+	err = parse(reflect.ValueOf(&target).Elem(), raw)
 
 	return target, err
 }
 
-func TestSetFieldScalars(t *testing.T) {
+func TestParseScalars(t *testing.T) {
 	t.Run("string", func(t *testing.T) {
 		got, err := parseInto[string](t, " keeps spaces ")
 		if err != nil || got != " keeps spaces " {
@@ -73,7 +80,7 @@ func TestSetFieldScalars(t *testing.T) {
 	})
 }
 
-func TestSetFieldRejectsOutOfRange(t *testing.T) {
+func TestParseRejectsOutOfRange(t *testing.T) {
 	cases := map[string]func() error{
 		"int8 overflow":  func() error { _, err := parseInto[int8](t, "200"); return err },
 		"uint negative":  func() error { _, err := parseInto[uint](t, "-1"); return err },
@@ -89,7 +96,7 @@ func TestSetFieldRejectsOutOfRange(t *testing.T) {
 	}
 }
 
-func TestSetFieldUsesTextUnmarshaler(t *testing.T) {
+func TestParseUsesTextUnmarshaler(t *testing.T) {
 	got, err := parseInto[secret.Secret](t, "s3cr3t")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -105,7 +112,7 @@ func TestSetFieldUsesTextUnmarshaler(t *testing.T) {
 	}
 }
 
-func TestSetFieldSlices(t *testing.T) {
+func TestParseSlices(t *testing.T) {
 	got, err := parseInto[[]string](t, "a,b,c")
 	if err != nil || len(got) != 3 || got[2] != "c" {
 		t.Fatalf("got %v, err %v", got, err)
@@ -128,7 +135,7 @@ func TestSetFieldSlices(t *testing.T) {
 	}
 }
 
-func TestSetFieldRejectsByteSlice(t *testing.T) {
+func TestParseRejectsByteSlice(t *testing.T) {
 	_, err := parseInto[[]byte](t, "abc")
 	if err == nil {
 		t.Fatal("a byte slice was accepted; its text form is ambiguous")
@@ -138,7 +145,7 @@ func TestSetFieldRejectsByteSlice(t *testing.T) {
 	}
 }
 
-func TestSetFieldMaps(t *testing.T) {
+func TestParseMaps(t *testing.T) {
 	got, err := parseInto[map[string]string](t, "env:prod,team:core")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -158,7 +165,7 @@ func TestSetFieldMaps(t *testing.T) {
 	}
 }
 
-func TestSetFieldMapRejections(t *testing.T) {
+func TestParseMapRejections(t *testing.T) {
 	cases := map[string]string{
 		"no separator":     "env",
 		"duplicate key":    "env:prod,env:dev",
@@ -183,7 +190,7 @@ func TestSetFieldMapRejections(t *testing.T) {
 	}
 }
 
-func TestSetFieldRejectsUnsupportedKind(t *testing.T) {
+func TestParseRejectsUnsupportedKind(t *testing.T) {
 	if _, err := parseInto[complex128](t, "1+2i"); err == nil {
 		t.Error("a complex number was accepted")
 	}

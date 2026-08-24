@@ -99,19 +99,18 @@ func TestModuleChecksEveryInstance(t *testing.T) {
 	}
 }
 
-func TestModuleIgnoresInstanceWithEmptyPrefix(t *testing.T) {
-	t.Setenv("HOST", "db:5432")
-	t.Setenv("PASSWORD", "s3cr3t")
-	t.Setenv("SOMETHING_ELSE", "unrelated")
-
+func TestModuleHasNoInstanceItCannotCheck(t *testing.T) {
+	// Every instance owns a prefix, so the scan has no exception to make: an
+	// instance with no prefix would claim the whole environment and is refused
+	// where it is declared.
 	err := fx.New(
 		fx.NopLogger,
 		Module(),
 		Provide[strictConfig]("postgres", WithPrefix("")),
 		fx.Invoke(func(strictConfig) {}),
 	).Err()
-	if err != nil {
-		t.Fatalf("an instance with no prefix must not claim the whole environment: %v", err)
+	if err == nil {
+		t.Fatal("an instance with no prefix was accepted")
 	}
 }
 

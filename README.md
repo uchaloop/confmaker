@@ -41,6 +41,10 @@ anything implementing `encoding.TextUnmarshaler`, a pointer to any of those, and
 a slice or map of them. `complex`, `uintptr`, and `[]byte` are rejected rather
 than guessed at.
 
+The parser for a field is chosen from its type when the config is bound, before
+any value is read, so a field that could never be read fails on the first start
+rather than on the first deployment that happens to set its variable.
+
 `encoding.TextUnmarshaler` is the extension point. A decimal, a nullable, a
 timestamp, a UUID - any type that decodes itself from text is read directly,
 refuses a bad value in its own words, takes a default from `SetDefaults`, and
@@ -98,15 +102,19 @@ The name is both the prefix and the Fx tag, so it may hold only lowercase
 letters, digits, and `_ - .`, and may not start or end with a separator. A name
 written two ways would read one set of variables and answer to another tag.
 
+Whichever separator a name uses, the variable is written with underscores:
+`read-replica`, `read_replica`, and `read.replica` all read `READ_REPLICA_HOST`.
+
 Override the prefix when it should not follow the name:
 
 ```go
 confx.Provide[otherlib.Config]("analytics", confx.WithPrefix("REPORTING_"))
 ```
 
-`WithPrefix("")` reads the `env` tags with no prefix at all. Such an instance
-owns no prefix, so the strict check below skips it - it would otherwise claim
-every variable in the environment.
+The prefix is written the way the variables are - upper case, digits and
+underscores - and ends with the underscore that separates it from a field's own
+name. Every instance owns one, so the strict check below has no exception to
+make.
 
 ### Nesting
 

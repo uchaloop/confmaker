@@ -44,6 +44,14 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- A field of a type that cannot be read from a variable is now refused when the
+  config is bound rather than when a value happens to arrive. The parser is
+  chosen from the field's type once, and the binding keeps it, so a declaration
+  error no longer depends on the environment.
+- An environment prefix is checked: it may hold only upper-case letters, digits
+  and underscores and must end with an underscore. `WithPrefix("")` is refused,
+  which retires the one instance shape the strict check could not cover, and
+  `WithPrefix("REPORTING")` no longer silently reads `REPORTINGHOST`.
 - Two fields claiming one variable - nesting the same struct twice and leaving
   `envPrefix` off the second - was accepted. One value filled both fields and the
   manifest listed the name twice. It is now refused, naming both declarations.

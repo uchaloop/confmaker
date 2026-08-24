@@ -46,10 +46,9 @@ type settings struct {
 type Option func(*settings)
 
 // WithPrefix overrides the environment-variable prefix derived from the instance
-// name. Pass an empty string to read env tags with no prefix at all (shared,
-// global variables); such an instance owns no prefix of its own and so is left
-// out of Module's strict check, which would otherwise claim the whole
-// environment.
+// name, for when the two should not follow each other. The prefix is written the
+// way the variables are - upper case, digits and underscores - and ends with the
+// underscore that separates it from a field's own name.
 func WithPrefix(prefix string) Option {
 	return func(s *settings) {
 		s.prefix = prefix
@@ -80,11 +79,10 @@ func ProvideNamed[T any](name string, opts ...Option) fx.Option {
 // it reads. Fx builds a group member only when the group is consumed, so the
 // manifest costs nothing in an application without Module.
 func provide[T any](name, tag string, opts []Option) fx.Option {
-	if err := checkName(name); err != nil {
+	prefix, err := resolvePrefix(name, opts)
+	if err != nil {
 		return fx.Error(err)
 	}
-
-	prefix := prefixFor(name, opts)
 
 	return fx.Options(
 		fx.Provide(
@@ -96,15 +94,25 @@ func provide[T any](name, tag string, opts []Option) fx.Option {
 	)
 }
 
-// prefixFor returns the environment prefix an instance reads with: the one
-// derived from its name, unless an option replaces it.
-func prefixFor(name string, opts []Option) string {
+// resolvePrefix returns the environment prefix an instance reads with: the one
+// derived from its name, unless an option replaces it. Both the name and the
+// resulting prefix are checked, because a prefix that does not look like one
+// reads nothing and says nothing.
+func resolvePrefix(name string, opts []Option) (string, error) {
+	if err := checkName(name); err != nil {
+		return "", err
+	}
+
 	set := settings{prefix: defaultPrefix(name)}
 	for _, opt := range opts {
 		opt(&set)
 	}
 
-	return set.prefix
+	if err := checkPrefix(set.prefix); err != nil {
+		return "", err
+	}
+
+	return set.prefix, nil
 }
 
 // build returns the constructor that fills a T's env-tagged fields with the
@@ -182,7 +190,33 @@ func checkName(name string) error {
 	return nil
 }
 
-// defaultPrefix turns an instance name into an env prefix: "main" -> "MAIN_",
+// checkPrefix rejects a prefix that would not read the variables it is meant to.
+// An empty one would claim every variable in the environment and could never be
+// checked for typos; one that does not end in an underscore would run into the
+// field's own name, turning HOST into REPORTINGHOST.
+func checkPrefix(prefix string) error {
+	if len(prefix) == 0 {
+		return errors.New("an environment prefix is required; every variable an application reads is prefixed")
+	}
+
+	for _, r := range prefix {
+		if valid := (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_'; !valid {
+			return fmt.Errorf(
+				"environment prefix %q may hold only upper-case letters, digits, and _ (found %q)",
+				prefix, r,
+			)
+		}
+	}
+
+	if !strings.HasSuffix(prefix, "_") {
+		return fmt.Errorf("environment prefix %q must end with _, which separates it from the field's own name", prefix)
+	}
+
+	return nil
+}
+
+// defaultPrefix turns an instance name into an env prefix. A variable is written
+// with underscores whatever the name uses, so "main" -> "MAIN_",
 // "read-replica" -> "READ_REPLICA_", "db.postgres" -> "DB_POSTGRES_".
 func defaultPrefix(name string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(name)) + "_"

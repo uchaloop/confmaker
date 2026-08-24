@@ -51,11 +51,12 @@ type descriptor struct {
 // nested through a pointer, two fields claiming one variable - is refused here
 // too, so a generator fails instead of writing an empty file.
 func Manifest[T any](name string, opts ...Option) ([]Variable, error) {
-	if err := checkName(name); err != nil {
+	prefix, err := resolvePrefix(name, opts)
+	if err != nil {
 		return nil, err
 	}
 
-	return manifestOf[T](prefixFor(name, opts))
+	return manifestOf[T](prefix)
 }
 
 // manifestOf binds a defaulted T under prefix and returns the variables it

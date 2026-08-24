@@ -24,155 +24,222 @@ var (
 	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 )
 
-// setField assigns raw to target, which is one field of a config. A type that
-// declares its own text form is decoded through it, whatever its kind;
-// otherwise a slice or a map is split with the given separators and a single
-// value is parsed by its type.
-func setField(target reflect.Value, raw, separator, keyValSeparator string) error {
-	// A named slice or map that unmarshals itself owns its whole syntax, so this
+// parser assigns the text of one variable to one value.
+type parser func(target reflect.Value, raw string) error
+
+// fieldParser returns the parser for a whole config field, or an error saying
+// why the field cannot be read from a variable.
+//
+// It is chosen once, when the config is bound, and the binding keeps it. That is
+// what makes a field of an unreadable type fail at startup rather than on the
+// first deployment that happens to set its variable, and it leaves one place
+// that decides what a type means.
+func fieldParser(t reflect.Type, separator, keyValSeparator string) (parser, error) {
+	// A named slice or map that decodes itself owns its whole syntax, so this
 	// comes before any splitting.
-	if unmarshaler, ok := textUnmarshaler(target); ok {
-		return unmarshaler.UnmarshalText([]byte(raw))
+	if declaresTextForm(t) {
+		return parseText, nil
 	}
 
-	switch target.Kind() {
+	switch t.Kind() {
 	case reflect.Slice:
-		return setSlice(target, raw, separator)
+		return sliceParser(t, separator)
 	case reflect.Map:
-		return setMap(target, raw, separator, keyValSeparator)
+		return mapParser(t, separator, keyValSeparator)
 	default:
-		return setScalar(target, raw)
+		return scalarParser(t)
 	}
 }
 
-// setSlice fills target with the elements of raw, split on separator. An empty
-// raw yields an empty slice rather than a nil one: the variable was set, so the
-// field is assigned.
-func setSlice(target reflect.Value, raw, separator string) error {
-	if target.Type().Elem().Kind() == reflect.Uint8 {
-		return errors.New("a byte slice has no unambiguous text form; use a string")
+// scalarParser returns the parser for a single value.
+func scalarParser(t reflect.Type) (parser, error) {
+	if declaresTextForm(t) {
+		return parseText, nil
 	}
 
-	parts := splitNonEmpty(raw, separator)
-
-	slice := reflect.MakeSlice(target.Type(), len(parts), len(parts))
-	for i, part := range parts {
-		if err := setScalar(slice.Index(i), part); err != nil {
-			return fmt.Errorf("element %d: %w", i, err)
-		}
+	if t.Kind() == reflect.Pointer {
+		return pointerParser(t)
 	}
 
-	target.Set(slice)
+	// Duration is an int64 underneath, so it has to be recognised by type before
+	// the integer case turns "30s" into a parse error.
+	if t == durationType {
+		return parseDuration, nil
+	}
 
-	return nil
+	switch t.Kind() {
+	case reflect.String:
+		return parseString, nil
+	case reflect.Bool:
+		return parseBool, nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return parseInt, nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return parseUint, nil
+	case reflect.Float32, reflect.Float64:
+		return parseFloat, nil
+	default:
+		return nil, fmt.Errorf("%s cannot be read from a variable", t)
+	}
 }
 
-// setMap fills target from entries of the form "key<keyValSeparator>value",
-// themselves split on separator. A duplicate key is an error rather than a
-// silent overwrite, and surrounding whitespace is rejected rather than trimmed,
-// so "a: 1" reports itself instead of yielding the value " 1".
-func setMap(target reflect.Value, raw, separator, keyValSeparator string) error {
-	mapType := target.Type()
-	result := reflect.MakeMap(mapType)
-
-	for _, entry := range splitNonEmpty(raw, separator) {
-		rawKey, rawValue, found := strings.Cut(entry, keyValSeparator)
-		if !found {
-			return fmt.Errorf("entry %q has no %q separating key from value", entry, keyValSeparator)
-		}
-		if err := checkUntrimmed(rawKey, "key"); err != nil {
-			return err
-		}
-		if err := checkUntrimmed(rawValue, "value"); err != nil {
-			return err
-		}
-
-		key := reflect.New(mapType.Key()).Elem()
-		if err := setScalar(key, rawKey); err != nil {
-			return fmt.Errorf("key %q: %w", rawKey, err)
-		}
-
-		if result.MapIndex(key).IsValid() {
-			return fmt.Errorf("key %q appears more than once", rawKey)
-		}
-
-		value := reflect.New(mapType.Elem()).Elem()
-		if err := setScalar(value, rawValue); err != nil {
-			return fmt.Errorf("key %q: %w", rawKey, err)
-		}
-
-		result.SetMapIndex(key, value)
+// pointerParser allocates the value behind a pointer and fills it.
+func pointerParser(t reflect.Type) (parser, error) {
+	parseElement, err := scalarParser(t.Elem())
+	if err != nil {
+		return nil, err
 	}
 
-	target.Set(result)
-
-	return nil
-}
-
-// setScalar assigns one parsed value to target: a pointer is allocated and
-// filled, a type with its own text form decodes itself, and everything else is
-// parsed by kind.
-func setScalar(target reflect.Value, raw string) error {
-	if unmarshaler, ok := textUnmarshaler(target); ok {
-		return unmarshaler.UnmarshalText([]byte(raw))
-	}
-
-	if target.Kind() == reflect.Pointer {
-		pointer := reflect.New(target.Type().Elem())
-		if err := setScalar(pointer.Elem(), raw); err != nil {
+	return func(target reflect.Value, raw string) error {
+		pointer := reflect.New(t.Elem())
+		if err := parseElement(pointer.Elem(), raw); err != nil {
 			return err
 		}
 
 		target.Set(pointer)
 
 		return nil
+	}, nil
+}
+
+// sliceParser splits a value on separator and parses each element. An empty
+// value yields an empty slice rather than a nil one: the variable was set, so
+// the field is assigned.
+func sliceParser(t reflect.Type, separator string) (parser, error) {
+	if t.Elem().Kind() == reflect.Uint8 {
+		return nil, errors.New("a byte slice has no unambiguous text form; use a string")
 	}
 
-	// Duration is an int64 underneath, so it has to be recognised by type before
-	// the integer case turns "30s" into a parse error.
-	if target.Type() == durationType {
-		return setDuration(target, raw)
+	parseElement, err := scalarParser(t.Elem())
+	if err != nil {
+		return nil, err
 	}
 
-	switch target.Kind() {
-	case reflect.String:
-		target.SetString(raw)
-	case reflect.Bool:
-		parsed, err := strconv.ParseBool(raw)
-		if err != nil {
-			return fmt.Errorf("%q is not a boolean", raw)
+	return func(target reflect.Value, raw string) error {
+		parts := splitNonEmpty(raw, separator)
+
+		slice := reflect.MakeSlice(t, len(parts), len(parts))
+		for i, part := range parts {
+			if err := parseElement(slice.Index(i), part); err != nil {
+				return fmt.Errorf("element %d: %w", i, err)
+			}
 		}
 
-		target.SetBool(parsed)
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		parsed, err := strconv.ParseInt(raw, 10, target.Type().Bits())
-		if err != nil {
-			return fmt.Errorf("%q is not %s", raw, target.Type())
-		}
+		target.Set(slice)
 
-		target.SetInt(parsed)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		parsed, err := strconv.ParseUint(raw, 10, target.Type().Bits())
-		if err != nil {
-			return fmt.Errorf("%q is not %s", raw, target.Type())
-		}
+		return nil
+	}, nil
+}
 
-		target.SetUint(parsed)
-	case reflect.Float32, reflect.Float64:
-		parsed, err := strconv.ParseFloat(raw, target.Type().Bits())
-		if err != nil {
-			return fmt.Errorf("%q is not %s", raw, target.Type())
-		}
-
-		target.SetFloat(parsed)
-	default:
-		return fmt.Errorf("%s is not a configurable type", target.Type())
+// mapParser reads entries of the form "key<keyValSeparator>value", themselves
+// split on separator. A duplicate key is an error rather than a silent
+// overwrite, and surrounding whitespace is rejected rather than trimmed, so
+// "a: 1" reports itself instead of yielding the value " 1".
+func mapParser(t reflect.Type, separator, keyValSeparator string) (parser, error) {
+	parseKey, err := scalarParser(t.Key())
+	if err != nil {
+		return nil, fmt.Errorf("map key: %w", err)
 	}
+
+	parseValue, err := scalarParser(t.Elem())
+	if err != nil {
+		return nil, fmt.Errorf("map value: %w", err)
+	}
+
+	return func(target reflect.Value, raw string) error {
+		result := reflect.MakeMap(t)
+
+		for _, entry := range splitNonEmpty(raw, separator) {
+			rawKey, rawValue, found := strings.Cut(entry, keyValSeparator)
+			if !found {
+				return fmt.Errorf("entry %q has no %q separating key from value", entry, keyValSeparator)
+			}
+			if err := checkUntrimmed(rawKey, "key"); err != nil {
+				return err
+			}
+			if err := checkUntrimmed(rawValue, "value"); err != nil {
+				return err
+			}
+
+			key := reflect.New(t.Key()).Elem()
+			if err := parseKey(key, rawKey); err != nil {
+				return fmt.Errorf("key %q: %w", rawKey, err)
+			}
+
+			if result.MapIndex(key).IsValid() {
+				return fmt.Errorf("key %q appears more than once", rawKey)
+			}
+
+			value := reflect.New(t.Elem()).Elem()
+			if err := parseValue(value, rawValue); err != nil {
+				return fmt.Errorf("key %q: %w", rawKey, err)
+			}
+
+			result.SetMapIndex(key, value)
+		}
+
+		target.Set(result)
+
+		return nil
+	}, nil
+}
+
+func parseText(target reflect.Value, raw string) error {
+	//nolint:forcetypeassert // declaresTextForm established the method set.
+	return target.Addr().Interface().(encoding.TextUnmarshaler).UnmarshalText([]byte(raw))
+}
+
+func parseString(target reflect.Value, raw string) error {
+	target.SetString(raw)
 
 	return nil
 }
 
-func setDuration(target reflect.Value, raw string) error {
+func parseBool(target reflect.Value, raw string) error {
+	parsed, err := strconv.ParseBool(raw)
+	if err != nil {
+		return fmt.Errorf("%q is not a boolean", raw)
+	}
+
+	target.SetBool(parsed)
+
+	return nil
+}
+
+func parseInt(target reflect.Value, raw string) error {
+	parsed, err := strconv.ParseInt(raw, 10, target.Type().Bits())
+	if err != nil {
+		return fmt.Errorf("%q is not %s", raw, target.Type())
+	}
+
+	target.SetInt(parsed)
+
+	return nil
+}
+
+func parseUint(target reflect.Value, raw string) error {
+	parsed, err := strconv.ParseUint(raw, 10, target.Type().Bits())
+	if err != nil {
+		return fmt.Errorf("%q is not %s", raw, target.Type())
+	}
+
+	target.SetUint(parsed)
+
+	return nil
+}
+
+func parseFloat(target reflect.Value, raw string) error {
+	parsed, err := strconv.ParseFloat(raw, target.Type().Bits())
+	if err != nil {
+		return fmt.Errorf("%q is not %s", raw, target.Type())
+	}
+
+	target.SetFloat(parsed)
+
+	return nil
+}
+
+func parseDuration(target reflect.Value, raw string) error {
 	parsed, err := time.ParseDuration(raw)
 	if err != nil {
 		return fmt.Errorf("%q is not a duration such as \"30s\" or \"5m\"", raw)
@@ -183,17 +250,11 @@ func setDuration(target reflect.Value, raw string) error {
 	return nil
 }
 
-// textUnmarshaler returns target's own text decoder when it declares one. The
-// method set of *T is checked, not T's, because UnmarshalText has to take a
+// declaresTextForm reports whether a value of type t decodes itself from text.
+// The method set of *T is checked, not T's, because UnmarshalText has to take a
 // pointer to have anything to assign to.
-func textUnmarshaler(target reflect.Value) (encoding.TextUnmarshaler, bool) {
-	if !target.CanAddr() || !reflect.PointerTo(target.Type()).Implements(textUnmarshalerType) {
-		return nil, false
-	}
-
-	unmarshaler, ok := target.Addr().Interface().(encoding.TextUnmarshaler)
-
-	return unmarshaler, ok
+func declaresTextForm(t reflect.Type) bool {
+	return reflect.PointerTo(t).Implements(textUnmarshalerType)
 }
 
 // splitNonEmpty splits raw on separator, treating an empty raw as no elements at
@@ -218,10 +279,9 @@ func checkUntrimmed(part, kind string) error {
 }
 
 // renderValue turns a field's current value back into the text a variable would
-// carry. A type that declares its own text form decides how it appears - which
-// is how a secret renders as its mask - and a slice or map is joined with the
-// separators its field declares, so the result can be pasted back into the
-// environment it came from.
+// carry. A type that declares its own text form decides how it appears, and a
+// slice or map is joined with the separators its field declares, so the result
+// can be pasted back into the environment it came from.
 func renderValue(value reflect.Value, separator, keyValSeparator string) string {
 	if marshaler, ok := value.Interface().(encoding.TextMarshaler); ok {
 		text, err := marshaler.MarshalText()

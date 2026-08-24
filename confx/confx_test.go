@@ -176,17 +176,20 @@ func TestProvideWithPrefixOverridesName(t *testing.T) {
 	}
 }
 
-func TestProvideWithEmptyPrefixReadsBareNames(t *testing.T) {
-	t.Setenv("ENDPOINT", "bare:9000")
-	t.Setenv("TOKEN", "s3cr3t")
-
-	cfg, err := runProvide(t, "alpha", WithPrefix(""))
-	if err != nil {
-		t.Fatalf("build: %v", err)
+func TestProvideRejectsAPrefixThatIsNotOne(t *testing.T) {
+	cases := map[string]string{
+		"empty":           "",
+		"no trailing _":   "REPORTING",
+		"lower case":      "reporting_",
+		"stray character": "REPORTING-",
 	}
 
-	if cfg.Endpoint != "bare:9000" {
-		t.Fatalf("endpoint = %q, want the unprefixed variable", cfg.Endpoint)
+	for name, prefix := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := runProvide(t, "alpha", WithPrefix(prefix)); err == nil {
+				t.Fatalf("prefix %q was accepted", prefix)
+			}
+		})
 	}
 }
 

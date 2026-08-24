@@ -16,11 +16,12 @@ type binding struct {
 
 	// field is the path of the struct field this variable fills, for an error
 	// that has to point at a declaration rather than at the environment.
-	field           string
-	target          reflect.Value
-	notEmpty        bool
-	separator       string
-	keyValSeparator string
+	field    string
+	target   reflect.Value
+	notEmpty bool
+	// parse was chosen from the field's type when the config was bound, so
+	// applying the environment is only a lookup and a call.
+	parse parser
 }
 
 // bind walks an addressable struct and returns one binding per variable it
@@ -101,7 +102,12 @@ func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Valu
 		value := structValue.Field(i)
 
 		if len(name) != 0 {
-			*bindings = append(*bindings, bindLeaf(field, name, options, prefix, path, value))
+			leaf, err := bindLeaf(field, name, options, prefix, path, value)
+			if err != nil {
+				*errs = append(*errs, err)
+			} else {
+				*bindings = append(*bindings, leaf)
+			}
 
 			continue
 		}
@@ -118,14 +124,24 @@ func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Valu
 	}
 }
 
-// bindLeaf builds the binding of a field that names a variable.
-func bindLeaf(field reflect.StructField, name, options, prefix, path string, value reflect.Value) binding {
+// bindLeaf builds the binding of a field that names a variable, choosing the
+// parser its type calls for.
+func bindLeaf(
+	field reflect.StructField,
+	name, options, prefix, path string,
+	value reflect.Value,
+) (binding, error) {
 	var (
 		notEmpty        = hasOption(options, "notEmpty")
 		secret          = isSecretType(field.Type)
 		separator       = separatorOf(field)
 		keyValSeparator = keyValSeparatorOf(field)
 	)
+
+	parse, err := fieldParser(field.Type, separator, keyValSeparator)
+	if err != nil {
+		return binding{}, fmt.Errorf("field %s: %w", path+field.Name, err)
+	}
 
 	variable := Variable{
 		Name:     prefix + name,
@@ -141,13 +157,12 @@ func bindLeaf(field reflect.StructField, name, options, prefix, path string, val
 	}
 
 	return binding{
-		Variable:        variable,
-		field:           path + field.Name,
-		target:          value,
-		notEmpty:        notEmpty,
-		separator:       separator,
-		keyValSeparator: keyValSeparator,
-	}
+		Variable: variable,
+		field:    path + field.Name,
+		target:   value,
+		notEmpty: notEmpty,
+		parse:    parse,
+	}, nil
 }
 
 // apply reads the environment into the bound fields. A variable that is not set
@@ -172,17 +187,17 @@ func apply(bindings []binding) error {
 			continue
 		}
 
-		if err := setField(b.target, raw, b.separator, b.keyValSeparator); err != nil {
-			errs = append(errs, describeSetError(b, err))
+		if err := b.parse(b.target, raw); err != nil {
+			errs = append(errs, describeParseError(b, err))
 		}
 	}
 
 	return errors.Join(errs...)
 }
 
-// describeSetError reports a value that would not parse. The value of a secret
+// describeParseError reports a value that would not parse. The value of a secret
 // is left out: the variable is named, never its contents.
-func describeSetError(b binding, err error) error {
+func describeParseError(b binding, err error) error {
 	if b.Secret {
 		return fmt.Errorf("variable %q holds a value that is not valid for %s", b.Name, b.Type)
 	}

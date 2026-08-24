@@ -104,3 +104,52 @@ func TestInstanceNameIsChecked(t *testing.T) {
 		}
 	}
 }
+
+// TestUnreadableTypeIsRefusedWhenBound is what choosing the parser from the type
+// buys: a field that could never be read fails on the first start, whether or
+// not anyone happens to set its variable.
+func TestUnreadableTypeIsRefusedWhenBound(t *testing.T) {
+	type shard struct {
+		Host string `env:"HOST"`
+	}
+
+	cases := map[string]func(*testing.T) error{
+		"a config in a slice": func(t *testing.T) error {
+			type config struct {
+				Shards []shard `env:"SHARDS"`
+			}
+
+			return bindError[config](t)
+		},
+		"a complex number": func(t *testing.T) error {
+			type config struct {
+				Ratio complex128 `env:"RATIO"`
+			}
+
+			return bindError[config](t)
+		},
+		"a byte slice": func(t *testing.T) error {
+			type config struct {
+				Data []byte `env:"DATA"`
+			}
+
+			return bindError[config](t)
+		},
+		"a map keyed by a struct": func(t *testing.T) error {
+			type config struct {
+				Weights map[shard]int `env:"WEIGHTS"`
+			}
+
+			return bindError[config](t)
+		},
+	}
+
+	for name, run := range cases {
+		t.Run(name, func(t *testing.T) {
+			// No variable is set: the declaration alone has to fail.
+			if err := run(t); !strings.Contains(err.Error(), "field") {
+				t.Fatalf("the error does not name the field: %v", err)
+			}
+		})
+	}
+}

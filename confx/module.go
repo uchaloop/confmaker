@@ -88,17 +88,13 @@ func Module(opts ...ModuleOption) fx.Option {
 }
 
 // checkEnvironment reports variables that start with a registered prefix but
-// match no declared field. An instance built with an empty prefix owns no prefix
-// of its own and is skipped by the scan - it would otherwise claim the whole
-// environment.
+// match no declared field.
 func checkEnvironment(descriptors []descriptor, allowed []string) error {
 	known := make(map[string]bool)
 	prefixes := make([]string, 0, len(descriptors))
 
 	for _, d := range descriptors {
-		if len(d.prefix) != 0 {
-			prefixes = append(prefixes, d.prefix)
-		}
+		prefixes = append(prefixes, d.prefix)
 
 		for _, variable := range d.variables {
 			known[variable.Name] = true
