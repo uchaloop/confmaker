@@ -7,8 +7,7 @@ import (
 	"github.com/uchaloop/secret/v2"
 )
 
-// secretValueType is the marker interface a secret type implements. A field of
-// such a type is never printed, only reported as set or unset.
+// secretValueType is the marker interface a secret type implements.
 var secretValueType = reflect.TypeOf((*secret.Value)(nil)).Elem()
 
 // Variable describes one environment variable a config type reads. Provide
@@ -50,9 +49,11 @@ type descriptor struct {
 // The options are the ones Provide takes, so a manifest taken with WithPrefix
 // matches the instance provided with the same option.
 //
-// A nested collection of structs contributes no variables: the env parser
-// numbers those per element (PREFIX_0_FIELD), so their names follow how many
-// elements are configured rather than T.
+// Two kinds of field contribute nothing, because the parser reads nothing from
+// them either: a nested slice of structs, whose variables the parser numbers per
+// element (PREFIX_0_FIELD) rather than by type, and a pointer to a struct
+// without the init option, which stays nil in a config built from its zero
+// value.
 func Manifest[T any](name string, opts ...Option) []Variable {
 	prefix, _ := resolve(name, opts)
 
@@ -85,11 +86,11 @@ type walker struct {
 }
 
 func (w *walker) walk(configType reflect.Type, prefix string) {
-	configType = deref(configType)
 	if configType.Kind() != reflect.Struct {
 		return
 	}
-	// A config that reaches itself would otherwise recurse forever.
+	// A config reachable from itself through an allocated pointer would
+	// otherwise recurse forever.
 	if w.seen[configType] {
 		return
 	}
@@ -98,78 +99,101 @@ func (w *walker) walk(configType reflect.Type, prefix string) {
 	defer delete(w.seen, configType)
 
 	for i := range configType.NumField() {
-		field := configType.Field(i)
-		// The env parser sets a field only when it is settable, which excludes
-		// every unexported field - an embedded unexported type included.
-		if len(field.PkgPath) != 0 {
-			continue
-		}
-
-		if tag, ok := field.Tag.Lookup("env"); ok {
-			if variable, ok := describeField(field, tag, prefix); ok {
-				w.variables = append(w.variables, variable)
-			}
-
-			continue
-		}
-
-		fieldType := deref(field.Type)
-
-		switch {
-		case fieldType.Kind() == reflect.Struct && !isSecretType(fieldType):
-			w.walk(fieldType, prefix+field.Tag.Get("envPrefix"))
-		case isStructCollection(fieldType):
-			w.open = true
-		}
+		w.field(configType.Field(i), prefix)
 	}
 }
 
-// isStructCollection reports whether t holds structs the env parser would number
-// per element. Their variable names depend on how many elements are configured,
-// so no type walk can list them.
-func isStructCollection(t reflect.Type) bool {
-	switch t.Kind() {
-	case reflect.Slice, reflect.Array, reflect.Map:
-		element := deref(t.Elem())
+// field records what the env parser would read from one struct field. It follows
+// the parser's own traversal, because a manifest that claims a variable the
+// parser ignores would make the strict check accept a name that has no effect.
+func (w *walker) field(field reflect.StructField, prefix string) {
+	// The parser sets a field only when it is settable, which excludes every
+	// unexported field - an embedded unexported type included.
+	if len(field.PkgPath) != 0 {
+		return
+	}
 
-		return element.Kind() == reflect.Struct && !isSecretType(element)
-	default:
-		return false
+	name, options, _ := strings.Cut(field.Tag.Get("env"), ",")
+	// `env:"-"` takes the field out of the parse entirely, nested fields included.
+	if name == "-" {
+		return
+	}
+
+	if len(name) != 0 {
+		w.variables = append(w.variables, describeField(field, name, options, prefix))
+	}
+
+	nested := prefix + field.Tag.Get("envPrefix")
+	fieldType := field.Type
+
+	switch {
+	case fieldType.Kind() == reflect.Struct:
+		// The parser descends into a struct field even when it has just set that
+		// field from a variable of its own.
+		w.walk(fieldType, nested)
+	case isPointerToStruct(fieldType) && hasOption(options, "init"):
+		// Every config starts from its zero value, so a pointer field is nil and
+		// the parser steps over it. Only the init option makes it allocate the
+		// struct and read the fields inside.
+		w.walk(fieldType.Elem(), nested)
+	case isSliceOfStructs(fieldType):
+		// The parser numbers these per element (PREFIX_0_FIELD), so their names
+		// follow how many elements are configured rather than the type.
+		w.open = true
 	}
 }
 
-// describeField builds the Variable for a leaf field from its env tag. A tag
-// carrying only options ("," or ",required") names no variable and is skipped,
-// matching the env parser.
-func describeField(field reflect.StructField, tag, prefix string) (Variable, bool) {
-	name, options, _ := strings.Cut(tag, ",")
-	if len(name) == 0 {
-		return Variable{}, false
-	}
-
+// describeField builds the Variable for a field the parser fills from name.
+func describeField(field reflect.StructField, name, options, prefix string) Variable {
 	variable := Variable{
-		Name:   prefix + name,
-		Type:   field.Type.String(),
-		Secret: isSecretType(deref(field.Type)),
-	}
-	for _, option := range strings.Split(options, ",") {
-		if option == "required" || option == "notEmpty" {
-			variable.Required = true
-		}
+		Name:     prefix + name,
+		Type:     field.Type.String(),
+		Required: hasOption(options, "required") || hasOption(options, "notEmpty"),
+		Secret:   isSecretType(field.Type),
 	}
 	variable.Default, variable.HasDefault = field.Tag.Lookup("envDefault")
 
-	return variable, true
+	return variable
 }
 
-func deref(t reflect.Type) reflect.Type {
-	for t.Kind() == reflect.Pointer {
+// hasOption reports whether the comma-separated options of an env tag contain
+// option.
+func hasOption(options, option string) bool {
+	for rest := options; len(rest) != 0; {
+		var current string
+
+		current, rest, _ = strings.Cut(rest, ",")
+		if current == option {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isPointerToStruct(t reflect.Type) bool {
+	return t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct
+}
+
+// isSliceOfStructs matches what the env parser numbers per element: a []struct,
+// or a pointer to one.
+func isSliceOfStructs(t reflect.Type) bool {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
-	return t
+	return t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Struct
 }
 
+// isSecretType reports whether a field of type t holds a secret. It is the one
+// thing the manifest needs to know about secrets: with configuration read from
+// the environment only, nothing else can populate such a field, so the type is
+// consulted purely so the dump reports it as set or unset instead of printing
+// it.
 func isSecretType(t reflect.Type) bool {
-	return t.Kind() != reflect.Pointer && t.Implements(secretValueType)
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	return t.Implements(secretValueType)
 }
