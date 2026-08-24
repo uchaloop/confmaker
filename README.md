@@ -114,9 +114,11 @@ POSTGRES_HOST
 POSTGRES_POOL_MAX_CONNS
 ```
 
-Nest by value. A struct reached through a pointer, a slice, or an array is
-rejected: how many variables it would read cannot be known from the type, and
-that is exactly what the strict check and the manifest rest on.
+Nest by value. A **config** reached through a pointer, a slice, a map, or an
+array is rejected: how many variables it would read cannot be known from the
+type, and that is exactly what the strict check and the manifest rest on. Only a
+struct that names variables of its own counts, so an untagged field holding a
+decimal or a timestamp is skipped like any other untagged field.
 
 ### Maps
 

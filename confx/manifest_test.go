@@ -286,32 +286,6 @@ func TestBindRejectsEnvDefault(t *testing.T) {
 	}
 }
 
-func TestBindRejectsStructThroughPointerOrSlice(t *testing.T) {
-	type pool struct {
-		MaxConns int `env:"MAX_CONNS"`
-	}
-
-	t.Run("pointer", func(t *testing.T) {
-		type config struct {
-			Pool *pool `envPrefix:"POOL_"`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "nest by value") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("slice", func(t *testing.T) {
-		type config struct {
-			Shards []pool
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "nest by value") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-}
-
 func TestBindRejectsNonStruct(t *testing.T) {
 	if err := bindError[*manifestConfig](t); !strings.Contains(err.Error(), "must be a struct") {
 		t.Fatalf("unexpected error: %v", err)

@@ -80,9 +80,9 @@ func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Valu
 		switch {
 		case field.Type.Kind() == reflect.Struct:
 			appendBindings(bindings, errs, value, prefix+field.Tag.Get("envPrefix"))
-		case holdsStruct(field.Type):
+		case nestsConfig(field.Type):
 			*errs = append(*errs, fmt.Errorf(
-				"field %s nests a struct through %s; nest by value so the variables it reads are known from the type",
+				"field %s nests a config through %s; nest by value so the variables it reads are known from the type",
 				field.Name, field.Type.Kind(),
 			))
 		}
@@ -150,16 +150,48 @@ func describeSetError(b binding, err error) error {
 	return fmt.Errorf("variable %q: %w", b.Name, err)
 }
 
-// holdsStruct reports whether t reaches a struct through a pointer or a
-// collection - shapes whose variables cannot be known from the type alone,
+// nestsConfig reports whether t reaches a config through a pointer or a
+// collection - a shape whose variables cannot be known from the type alone,
 // because they depend on what is allocated or how many elements exist.
-func holdsStruct(t reflect.Type) bool {
+//
+// Only a struct that names variables of its own counts. A field holding a
+// decimal, a nullable, or a timestamp reaches a struct too, and one without an
+// env tag is simply not configuration, the same as any other untagged field.
+func nestsConfig(t reflect.Type) bool {
 	switch t.Kind() {
-	case reflect.Pointer, reflect.Slice, reflect.Array:
-		return t.Elem().Kind() == reflect.Struct
+	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
+		return declaresVariables(t.Elem())
 	default:
 		return false
 	}
+}
+
+// declaresVariables reports whether t, or a struct nested in it by value, names
+// an environment variable.
+func declaresVariables(t reflect.Type) bool {
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+
+	for i := range t.NumField() {
+		field := t.Field(i)
+		if len(field.PkgPath) != 0 {
+			continue
+		}
+
+		name, _, _ := strings.Cut(field.Tag.Get("env"), ",")
+
+		switch {
+		case name == "-":
+			continue
+		case len(name) != 0:
+			return true
+		case declaresVariables(field.Type):
+			return true
+		}
+	}
+
+	return false
 }
 
 func separatorOf(field reflect.StructField) string {
