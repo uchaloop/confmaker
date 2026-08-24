@@ -4,22 +4,16 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/uchaloop/confmaker.svg)](https://pkg.go.dev/github.com/uchaloop/confmaker)
 [![License: MIT](https://img.shields.io/github/license/uchaloop/confmaker)](LICENSE)
 
-Typed configuration for Go services: environment variables only, wired into Uber
-Fx, with defaults in code, validation, and a strict check that catches
-misspelled variables at startup. It depends on Fx and a secret type, nothing
-else.
-
-Configuration lives in the environment and nowhere else - no files, no
-environment-named config groups
-([12factor III](https://12factor.net/config)).
-
-## Installation
+Typed configuration for Go services, read from the environment and nowhere else
+([12factor III](https://12factor.net/config)). Each library declares its own
+config; confmaker fills it, validates it, and hands it to Uber Fx. Its only
+dependencies are Fx and a secret type.
 
 ```bash
 go get github.com/uchaloop/confmaker
 ```
 
-## Configuration type
+## Declaring a config
 
 A library declares its config as a plain struct with `env` tags:
 
@@ -32,29 +26,18 @@ type Config struct {
 ```
 
 The tags are inert strings, so the library depends only on
-[`github.com/uchaloop/secret/v2`](https://github.com/uchaloop/secret), not on
-this package. A field without an `env` tag is not configuration and is never
-touched.
+[`secret/v2`](https://github.com/uchaloop/secret), not on this package. A field
+without an `env` tag is not configuration and is never touched.
 
 Field types: `string`, `bool`, every sized integer and float, `time.Duration`,
 anything implementing `encoding.TextUnmarshaler`, a pointer to any of those, and
-a slice or map of them. `complex`, `uintptr`, and `[]byte` are rejected rather
-than guessed at.
+a slice or map of them. `TextUnmarshaler` is the extension point - a decimal, a
+nullable, a UUID decodes itself, with no parser to register.
 
-The parser for a field is chosen from its type when the config is bound, before
-any value is read, so a field that could never be read fails on the first start
-rather than on the first deployment that happens to set its variable.
+### Defaults
 
-`encoding.TextUnmarshaler` is the extension point. A decimal, a nullable, a
-timestamp, a UUID - any type that decodes itself from text is read directly,
-refuses a bad value in its own words, takes a default from `SetDefaults`, and
-renders back to text for the dump and the manifest. No registration, no parser
-function to hand over.
-
-## Defaults
-
-A config establishes its own defaults in code, where its tests and its callers
-see the same values the environment starts from:
+Defaults live in code, where the library's tests and its callers see the same
+values the environment starts from:
 
 ```go
 func (c *Config) SetDefaults() {
@@ -63,20 +46,50 @@ func (c *Config) SetDefaults() {
 }
 ```
 
-The method is optional and its name is the whole contract - a config without one
-starts from its zero value. Three rules govern what happens next:
+The method is optional; a config without one starts from its zero value. Then:
 
 - a variable that is **not set** leaves its field as `SetDefaults` left it;
 - a variable that is **set** assigns its field;
-- a variable set to the **empty string** assigns the empty value, and fails
-  `notEmpty`.
+- a variable set to the **empty string** assigns the empty value.
 
-There is no `envDefault` tag: a default in a tag is invisible to code and to
-tests. Declaring one is an error that names `SetDefaults` as its replacement.
+There is no `envDefault` tag - a default in a tag is invisible to code.
 
-## Fx
+### Required values
 
-### Default and named instances
+`required` fails the start when the variable is unset, `notEmpty` when it is
+unset or empty. Both are about the *variable*, not the value: a default in
+`SetDefaults` satisfies neither, because the deployment is still expected to
+supply it.
+
+### Validation
+
+`Validate() error` runs after the environment is applied:
+
+```go
+func (c Config) Validate() error {
+	var errors validate.Errors
+	errors.Require(len(c.Addr) != 0, "addr is required")
+	errors.Require(c.Timeout > 0, "timeout must be positive")
+
+	return errors.Err()
+}
+```
+
+Every problem is reported at once - across binding, parsing and validation
+alike - one per line, each naming the config it belongs to:
+
+```text
+config "postgres": required variable "POSTGRES_HOST" is not set
+config "postgres": timeout must be positive
+```
+
+### Secrets
+
+Use [`secret/v2`](https://github.com/uchaloop/secret) for anything that must not
+be logged. A secret is never printed: not in the dump, not in the manifest, not
+in the error for a value that would not parse, and it publishes no default.
+
+## Wiring it up
 
 The instance name gives the environment prefix:
 
@@ -99,25 +112,16 @@ ANALYTICS_ADDR
 additional instances of the same type.
 
 The name is both the prefix and the Fx tag, so it may hold only lowercase
-letters, digits, and `_ - .`, and may not start or end with a separator. A name
-written two ways would read one set of variables and answer to another tag.
+letters, digits and `_ - .`, and may not start or end with a separator.
+Whichever separator it uses, the variable is written with underscores:
+`read-replica` and `read_replica` both read `READ_REPLICA_HOST`, which is why
+two instances may not be named that way at once.
 
-Whichever separator a name uses, the variable is written with underscores:
-`read-replica`, `read_replica`, and `read.replica` all read `READ_REPLICA_HOST`.
-Because they arrive at one prefix, two instances may not be named that way at
-once - the strict check accepts a variable any instance declares, so instances
-sharing a prefix would cover for each other's typos.
-
-Override the prefix when it should not follow the name:
+`WithPrefix` overrides the prefix when it should not follow the name:
 
 ```go
 confx.Provide[otherlib.Config]("analytics", confx.WithPrefix("REPORTING_"))
 ```
-
-The prefix is written the way the variables are - upper case, digits and
-underscores - and ends with the underscore that separates it from a field's own
-name. Every instance owns one, so the strict check below has no exception to
-make.
 
 ### Nesting
 
@@ -135,66 +139,63 @@ POSTGRES_HOST
 POSTGRES_POOL_MAX_CONNS
 ```
 
-Nest by value. A **config** reached through a pointer, a slice, a map, or an
-array is rejected: how many variables it would read cannot be known from the
-type, and that is exactly what the strict check and the manifest rest on. Only a
-struct that names variables of its own counts, so an untagged field holding a
-decimal or a timestamp is skipped like any other untagged field.
+Nest by value: how many variables a config reads has to be known from its type,
+which a pointer or a collection cannot promise.
 
-Two fields claiming one variable is rejected too - nesting the same struct twice
-and leaving `envPrefix` off the second is the usual way it happens:
+### Slices and maps
 
-```text
-variable "APP_MAX_CONNS" is claimed by both Primary.MaxConns and Replica.MaxConns;
-give one of them an envPrefix
-```
-
-### Maps
-
-A map is read from one variable, so it stays enumerable:
+A slice splits on `envSeparator` (default `,`). A map reads from one variable,
+splitting entries the same way and a key from its value on `envKeyValSeparator`
+(default `:`).
 
 ```go
 type Config struct {
-	Labels map[string]string `env:"LABELS"`
+	Brokers []string          `env:"BROKERS"`
+	Labels  map[string]string `env:"LABELS"`
 }
 ```
 
 ```text
+OZON_BROKERS=a:9092,b:9092
 OZON_LABELS=env:prod,team:core
 ```
 
-`envSeparator` (default `,`) splits entries, `envKeyValSeparator` (default `:`)
-splits a key from its value. A duplicate key is an error, and a key or value
-padded with whitespace is reported rather than trimmed - `env: prod` says so
-instead of quietly yielding the value `" prod"`. The same `envSeparator`
-splits a slice.
+A duplicate key is an error, and a key or value padded with whitespace is
+reported rather than trimmed - `env: prod` says so instead of quietly yielding
+`" prod"`.
 
-### The strict check
+## Catching mistakes
 
-`confx.Module()` compares the environment against the manifest the `Provide`
-calls register. A variable that starts with a prefix the application owns but
-matches no field fails the start:
+What a declaration can get wrong is refused when the config is bound - on the
+first start, whether or not the environment happens to set the variable:
+
+| Refused | Because |
+|---|---|
+| `envDefault` on a field | a default belongs in `SetDefaults` |
+| an option other than `required` / `notEmpty` | `requred` would leave the field optional in silence |
+| two fields claiming one variable | one value would fill both |
+| a config nested through a pointer, slice, map or array | its variables cannot be known from the type |
+| a field of a type that cannot be read from text | it could never be filled |
+| an empty `envSeparator` | a value would split into single characters |
+| an instance name or prefix that is not one | it would read nothing and say nothing |
+
+`confx.Module()` adds the check the environment itself needs. A variable that
+starts with a prefix the application owns but matches no field fails the start:
 
 ```text
 unknown configuration variable "POSTGRES_HSOT" (did you mean "POSTGRES_HOST"?)
 ```
 
-Only the application's own prefixes are examined; everything else in the
-environment is left alone. Register `Module` before the `Provide` calls it
-covers, so the check runs ahead of the constructors and reports the typo instead
-of the missing value it causes.
+Variables outside the application's own prefixes are never examined. Register
+`Module` before the `Provide` calls it covers, so the check runs ahead of the
+constructors and reports the typo instead of the missing value it causes. When
+one environment is shared between binaries, exempt a sibling's prefix with
+`confx.AllowUnknown("EXPORTER_")`.
 
-When one environment is shared between several binaries, exempt a sibling's
-prefix:
+### Seeing what was read
 
-```go
-confx.Module(confx.AllowUnknown("EXPORTER_"))
-```
-
-### Dumping the configuration
-
-`WithDump` writes every variable the application reads, with its current value
-and where that value comes from:
+`WithDump` writes every variable the application reads, with its value and where
+that value came from:
 
 ```go
 confx.Module(confx.WithDump(os.Stdout))
@@ -207,13 +208,11 @@ postgres  POSTGRES_PASSWORD        secret.Secret  (set)     env
 postgres  POSTGRES_POOL_MAX_CONNS  int32          2         default
 ```
 
-Secrets are reported as set or unset; their values are never written.
-
 ## Generating from the manifest
 
 `Manifest` resolves the same list without building an application, so a
-`.env.example`, a ConfigMap, or a documentation table can be generated from the
-config type itself:
+`.env.example`, a ConfigMap or a documentation table comes from the config type
+itself:
 
 ```go
 variables, err := confx.Manifest[pgfx.Config]("postgres")
@@ -232,60 +231,10 @@ POSTGRES_POOL_MAX_CONNS=2
 POSTGRES_PASSWORD=
 ```
 
-Variables come in declaration order, and each carries its Go type, whether it is
-required, whether it holds a secret, and the default `SetDefaults` establishes
-for it - rendered as text the variable could carry back. It takes the same
-options as `Provide`, so a manifest resolved with `WithPrefix` matches the
-instance provided with it.
-
-The manifest comes from the same traversal that fills the config, so a variable
-it lists is exactly a variable the config reads. A declaration the application
-would refuse is refused here too, rather than yielding an empty file. A secret
-publishes no default: its rendering would be a mask, which reads as a value and
-would be pasted into a deployment as one.
-
-## Secrets
-
-Use [`github.com/uchaloop/secret/v2`](https://github.com/uchaloop/secret) for
-secret values:
-
-```go
-type Config struct {
-	Password secret.Secret `env:"PASSWORD,notEmpty"`
-}
-```
-
-`notEmpty` fails the start when the variable is unset or empty, naming only the
-variable and never the value. A secret is never printed: not in the dump, not in
-the manifest, and not in the error for a value that would not parse.
-
-`required` and `notEmpty` are about the variable, not the value - a default in
-`SetDefaults` does not satisfy either, because the deployment is still expected
-to supply it.
-
-## Validation
-
-`confx` calls `Validate() error` after applying the environment:
-
-```go
-func (c Config) Validate() error {
-	var errors validate.Errors
-	errors.Require(len(c.Addr) != 0, "addr is required")
-	errors.Require(c.Timeout > 0, "timeout must be positive")
-
-	return errors.Err()
-}
-```
-
-Every problem is reported at once - across binding, parsing, and validation
-alike - so a misconfigured deployment takes one run to diagnose, not one run per
-mistake. Each problem is a line of its own, and each line names the config it
-belongs to:
-
-```text
-config "postgres": required variable "POSTGRES_HOST" is not set
-config "postgres": required variable "POSTGRES_USER" is not set
-```
+Variables come in declaration order, each with its Go type, whether it is
+required, whether it holds a secret, and its default rendered as text the
+variable could carry back. It is the same traversal that fills the config, so a
+variable it lists is exactly a variable the config reads.
 
 ## Acknowledgements
 

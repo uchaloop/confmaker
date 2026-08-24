@@ -1,31 +1,31 @@
-// Package confx wires configuration into Uber Fx. For every instance a library
-// needs, it builds that library's own typed config from the environment,
-// validates it, and provides it into the container - untagged for the single
-// default instance, under a name tag for additional ones - so a library's Fx
-// module consumes a ready config without touching the environment itself.
+// Package confx builds a library's typed config from the environment and
+// provides it into an Uber Fx container, so the library consumes a ready config
+// without reading the environment itself.
 //
-// A library declares its config as a plain struct with `env` tags:
+// A config is a plain struct with `env` tags. The tags are inert strings, so the
+// library depends only on the secret type (github.com/uchaloop/secret/v2), not
+// on this package:
 //
 //	type Config struct {
 //		Host     string        `env:"HOST"`
-//		Database string        `env:"DATABASE"`
+//		Timeout  time.Duration `env:"TIMEOUT"`
 //		Password secret.Secret `env:"PASSWORD,notEmpty"`
 //	}
 //
-// The tags are inert strings, so the library depends only on the secret type
-// (github.com/uchaloop/secret/v2), not on this package. The instance name gives
-// the prefix, so Provide[Config]("postgres") reads POSTGRES_HOST,
-// POSTGRES_PASSWORD and so on.
-//
-// A config is built in three steps, each of them optional. It establishes its
-// own defaults through a SetDefaults method, the environment overrides what it
-// sets, and a Validate method checks the result:
-//
 //	func (c *Config) SetDefaults() { c.Timeout = 30 * time.Second }
 //
-// A variable that is not set leaves its field exactly as SetDefaults left it, so
-// defaults live in the library's own code where its tests and its callers can
-// see them. A variable that is set assigns its field, an empty value included.
+// The instance name gives the prefix, so Provide[Config]("postgres") reads
+// POSTGRES_HOST and the rest. Building one runs three optional steps: SetDefaults
+// establishes the config's own defaults, the environment overrides what it sets,
+// and Validate checks the result. A variable that is not set leaves its field as
+// SetDefaults left it; a variable that is set assigns it, an empty value
+// included.
+//
+// Module adds the check for the environment: a variable under a prefix the
+// application owns that matches no field fails the start. What a declaration
+// itself can get wrong - a default in a tag, an unknown option, two fields on one
+// variable, a type that cannot be read - is refused when the config is bound,
+// before any value is looked at.
 package confx
 
 import (
