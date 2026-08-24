@@ -138,6 +138,10 @@ func bindLeaf(
 		keyValSeparator = keyValSeparatorOf(field)
 	)
 
+	if err := checkOptions(options); err != nil {
+		return binding{}, fmt.Errorf("field %s: %w", path+field.Name, err)
+	}
+
 	parse, err := fieldParser(field.Type, separator, keyValSeparator)
 	if err != nil {
 		return binding{}, fmt.Errorf("field %s: %w", path+field.Name, err)
@@ -263,6 +267,30 @@ func keyValSeparatorOf(field reflect.StructField) string {
 	}
 
 	return defaultKeyValSeparator
+}
+
+// checkOptions rejects an option the env tag does not define. An unrecognised
+// one would otherwise be ignored, so a misspelled "required" would leave the
+// field optional and say nothing.
+func checkOptions(options string) error {
+	var errs []error
+
+	for rest := options; len(rest) != 0; {
+		var current string
+
+		current, rest, _ = strings.Cut(rest, ",")
+
+		switch current {
+		case "", "required", "notEmpty":
+		default:
+			errs = append(errs, fmt.Errorf(
+				"unknown env option %q; the tag takes required and notEmpty",
+				current,
+			))
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 // hasOption reports whether the comma-separated options of an env tag contain

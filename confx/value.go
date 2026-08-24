@@ -109,6 +109,10 @@ func sliceParser(t reflect.Type, separator string) (parser, error) {
 	if t.Elem().Kind() == reflect.Uint8 {
 		return nil, errors.New("a byte slice has no unambiguous text form; use a string")
 	}
+	// Splitting on nothing yields one element per character.
+	if len(separator) == 0 {
+		return nil, errors.New("envSeparator is empty; a slice needs something to split on")
+	}
 
 	parseElement, err := scalarParser(t.Elem())
 	if err != nil {
@@ -136,6 +140,13 @@ func sliceParser(t reflect.Type, separator string) (parser, error) {
 // overwrite, and surrounding whitespace is rejected rather than trimmed, so
 // "a: 1" reports itself instead of yielding the value " 1".
 func mapParser(t reflect.Type, separator, keyValSeparator string) (parser, error) {
+	if len(separator) == 0 {
+		return nil, errors.New("envSeparator is empty; a map needs something to split entries on")
+	}
+	if len(keyValSeparator) == 0 {
+		return nil, errors.New("envKeyValSeparator is empty; a map needs something to split a key from its value")
+	}
+
 	parseKey, err := scalarParser(t.Key())
 	if err != nil {
 		return nil, fmt.Errorf("map key: %w", err)
