@@ -90,6 +90,10 @@ func Module(opts ...ModuleOption) fx.Option {
 // checkEnvironment reports variables that start with a registered prefix but
 // match no declared field.
 func checkEnvironment(descriptors []descriptor, allowed []string) error {
+	if err := checkPrefixesAreDistinct(descriptors); err != nil {
+		return err
+	}
+
 	known := make(map[string]bool)
 	prefixes := make([]string, 0, len(descriptors))
 
@@ -121,6 +125,34 @@ func checkEnvironment(descriptors []descriptor, allowed []string) error {
 	errs := make([]error, 0, len(unknown))
 	for _, name := range unknown {
 		errs = append(errs, fmt.Errorf("unknown configuration variable %q%s", name, hint(name, known)))
+	}
+
+	return errors.Join(errs...)
+}
+
+// checkPrefixesAreDistinct refuses two instances reading one prefix. The scan
+// accepts a variable that any instance declares, so instances sharing a prefix
+// would cover for each other's typos: a name meant for one and misspelled into
+// the other's would pass unnoticed.
+//
+// A name reaches its prefix through the separators it uses - read-replica,
+// read_replica and read.replica all read READ_REPLICA_ - so two names that look
+// distinct can arrive at one.
+func checkPrefixesAreDistinct(descriptors []descriptor) error {
+	owner := make(map[string]string, len(descriptors))
+
+	var errs []error
+
+	for _, d := range descriptors {
+		switch first, taken := owner[d.prefix]; {
+		case !taken:
+			owner[d.prefix] = d.label
+		case first != d.label:
+			errs = append(errs, fmt.Errorf(
+				"instances %q and %q both read the prefix %q; one of them cannot be checked for typos",
+				first, d.label, d.prefix,
+			))
+		}
 	}
 
 	return errors.Join(errs...)

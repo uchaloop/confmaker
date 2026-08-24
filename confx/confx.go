@@ -116,52 +116,76 @@ func resolvePrefix(name string, opts []Option) (string, error) {
 }
 
 // build returns the constructor that fills a T's env-tagged fields with the
-// given prefix and validates the result. label names the instance in errors.
-func build[T any](prefix, label string) func() (T, error) {
+// given prefix and validates the result. name identifies the instance in errors.
+func build[T any](prefix, name string) func() (T, error) {
 	return func() (T, error) {
 		var cfg T
 
-		err := fillEnv(&cfg, prefix, label)
+		err := fillEnv(&cfg, prefix, name)
 
 		return cfg, err
 	}
 }
 
 // describe returns the constructor of one instance's manifest.
-func describe[T any](prefix, label string) func() (descriptor, error) {
+func describe[T any](prefix, name string) func() (descriptor, error) {
 	return func() (descriptor, error) {
 		variables, err := manifestOf[T](prefix)
 		if err != nil {
-			return descriptor{}, fmt.Errorf("config %q: %w", label, err)
+			return descriptor{}, configError(name, err)
 		}
 
-		return descriptor{label: label, prefix: prefix, variables: variables}, nil
+		return descriptor{label: name, prefix: prefix, variables: variables}, nil
 	}
 }
 
 // fillEnv builds cfg in three optional steps: the config establishes its own
 // defaults, the environment overrides what it sets, and the result is validated.
 // A variable that is not set leaves its field as the defaults left it.
-func fillEnv[T any](cfg *T, prefix, label string) error {
+func fillEnv[T any](cfg *T, prefix, name string) error {
 	setDefaults(cfg)
 
 	bindings, err := bind(reflect.ValueOf(cfg).Elem(), prefix)
 	if err != nil {
-		return fmt.Errorf("config %q: %w", label, err)
+		return configError(name, err)
 	}
 	if err := apply(bindings); err != nil {
-		return fmt.Errorf("config %q: %w", label, err)
+		return configError(name, err)
 	}
 	// Check cfg (a *T), not *cfg: *T's method set includes both value- and
 	// pointer-receiver Validate methods, so a library that declares Validate on a
 	// pointer receiver is still validated.
 	if v, ok := any(cfg).(interface{ Validate() error }); ok {
 		if err := v.Validate(); err != nil {
-			return fmt.Errorf("config %q: %w", label, err)
+			return configError(name, err)
 		}
 	}
 
 	return nil
+}
+
+// configError attributes err to the instance it came from. Every stage reports
+// all of its problems at once, and a joined error renders one per line - so the
+// name goes on each of them, not only on the first. A line that scrolls past on
+// its own still says which config it is about, which matters when one process
+// builds several.
+func configError(name string, err error) error {
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return fmt.Errorf("config %q: %w", name, err)
+	}
+
+	parts := joined.Unwrap()
+	if len(parts) == 0 {
+		return fmt.Errorf("config %q: %w", name, err)
+	}
+
+	labelled := make([]error, len(parts))
+	for i, part := range parts {
+		labelled[i] = configError(name, part)
+	}
+
+	return errors.Join(labelled...)
 }
 
 // checkName rejects an instance name that would not make a sensible prefix or a

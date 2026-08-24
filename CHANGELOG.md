@@ -44,6 +44,14 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Every line of a multi-problem error now names the config it belongs to. A
+  joined error renders one problem per line, and only the first line carried the
+  label, so the rest were unattributable in a process that builds several
+  configs.
+- Two instances reading one environment prefix are refused. The scan accepts a
+  variable any instance declares, so instances sharing a prefix covered for each
+  other's typos. Names reach a prefix through the separators they use, which is
+  how `read-replica` and `read_replica` both arrive at `READ_REPLICA_`.
 - A field of a type that cannot be read from a variable is now refused when the
   config is bound rather than when a value happens to arrive. The parser is
   chosen from the field's type once, and the binding keeps it, so a declaration

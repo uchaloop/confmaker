@@ -153,3 +153,52 @@ func TestUnreadableTypeIsRefusedWhenBound(t *testing.T) {
 		})
 	}
 }
+
+// TestConfigErrorLabelsEveryLine keeps a multi-problem report readable: a joined
+// error renders one problem per line, and a line that scrolls past on its own
+// still has to say which config it belongs to.
+func TestConfigErrorLabelsEveryLine(t *testing.T) {
+	type config struct {
+		Host string `env:"HOST,required"`
+		User string `env:"USER,required"`
+	}
+
+	var cfg config
+	err := fillEnv(&cfg, "APP_", "postgres")
+	if err == nil {
+		t.Fatal("expected both variables to be reported")
+	}
+
+	lines := strings.Split(err.Error(), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected one line per problem, got:\n%v", err)
+	}
+
+	for _, line := range lines {
+		if !strings.HasPrefix(line, `config "postgres":`) {
+			t.Errorf("line is not attributed to its config: %q", line)
+		}
+	}
+}
+
+// TestTwoInstancesMayNotShareAPrefix guards the scan: it accepts a variable any
+// instance declares, so two instances on one prefix would hide each other's
+// typos. Separators normalise, which is how two distinct names get there.
+func TestTwoInstancesMayNotShareAPrefix(t *testing.T) {
+	t.Setenv("READ_REPLICA_HOST", "db:5432")
+	t.Setenv("READ_REPLICA_PASSWORD", "s3cr3t")
+
+	err := fx.New(
+		fx.NopLogger,
+		Module(),
+		Provide[strictConfig]("read-replica"),
+		ProvideNamed[strictConfig]("read_replica"),
+		fx.Invoke(func(strictConfig) {}),
+	).Err()
+	if err == nil {
+		t.Fatal("two instances read one prefix and the check said nothing")
+	}
+	if !strings.Contains(err.Error(), "READ_REPLICA_") {
+		t.Fatalf("the error does not name the shared prefix: %v", err)
+	}
+}

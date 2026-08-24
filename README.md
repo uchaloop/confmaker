@@ -104,6 +104,9 @@ written two ways would read one set of variables and answer to another tag.
 
 Whichever separator a name uses, the variable is written with underscores:
 `read-replica`, `read_replica`, and `read.replica` all read `READ_REPLICA_HOST`.
+Because they arrive at one prefix, two instances may not be named that way at
+once - the strict check accepts a variable any instance declares, so instances
+sharing a prefix would cover for each other's typos.
 
 Override the prefix when it should not follow the name:
 
@@ -274,9 +277,15 @@ func (c Config) Validate() error {
 }
 ```
 
-Every problem is reported at once - across defaults, parsing, and validation
+Every problem is reported at once - across binding, parsing, and validation
 alike - so a misconfigured deployment takes one run to diagnose, not one run per
-mistake.
+mistake. Each problem is a line of its own, and each line names the config it
+belongs to:
+
+```text
+config "postgres": required variable "POSTGRES_HOST" is not set
+config "postgres": required variable "POSTGRES_USER" is not set
+```
 
 ## Acknowledgements
 
