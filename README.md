@@ -41,6 +41,12 @@ anything implementing `encoding.TextUnmarshaler`, a pointer to any of those, and
 a slice or map of them. `complex`, `uintptr`, and `[]byte` are rejected rather
 than guessed at.
 
+`encoding.TextUnmarshaler` is the extension point. A decimal, a nullable, a
+timestamp, a UUID - any type that decodes itself from text is read directly,
+refuses a bad value in its own words, takes a default from `SetDefaults`, and
+renders back to text for the dump and the manifest. No registration, no parser
+function to hand over.
+
 ## Defaults
 
 A config establishes its own defaults in code, where its tests and its callers
