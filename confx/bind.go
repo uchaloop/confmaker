@@ -14,6 +14,9 @@ import (
 type binding struct {
 	Variable
 
+	// field is the path of the struct field this variable fills, for an error
+	// that has to point at a declaration rather than at the environment.
+	field           string
 	target          reflect.Value
 	notEmpty        bool
 	separator       string
@@ -37,12 +40,38 @@ func bind(root reflect.Value, prefix string) ([]binding, error) {
 		errs     []error
 	)
 
-	appendBindings(&bindings, &errs, root, prefix)
+	appendBindings(&bindings, &errs, root, prefix, "")
+
+	errs = append(errs, checkCollisions(bindings)...)
 
 	return bindings, errors.Join(errs...)
 }
 
-func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Value, prefix string) {
+// checkCollisions reports variables two fields both claim. One value would fill
+// both fields and the manifest would list the name twice - almost always an
+// envPrefix left off a second nested struct.
+func checkCollisions(bindings []binding) []error {
+	claimed := make(map[string]string, len(bindings))
+
+	var errs []error
+
+	for _, b := range bindings {
+		if first, taken := claimed[b.Name]; taken {
+			errs = append(errs, fmt.Errorf(
+				"variable %q is claimed by both %s and %s; give one of them an envPrefix",
+				b.Name, first, b.field,
+			))
+
+			continue
+		}
+
+		claimed[b.Name] = b.field
+	}
+
+	return errs
+}
+
+func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Value, prefix, path string) {
 	structType := structValue.Type()
 
 	for i := range structType.NumField() {
@@ -72,14 +101,14 @@ func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Valu
 		value := structValue.Field(i)
 
 		if len(name) != 0 {
-			*bindings = append(*bindings, bindLeaf(field, name, options, prefix, value))
+			*bindings = append(*bindings, bindLeaf(field, name, options, prefix, path, value))
 
 			continue
 		}
 
 		switch {
 		case field.Type.Kind() == reflect.Struct:
-			appendBindings(bindings, errs, value, prefix+field.Tag.Get("envPrefix"))
+			appendBindings(bindings, errs, value, prefix+field.Tag.Get("envPrefix"), path+field.Name+".")
 		case nestsConfig(field.Type):
 			*errs = append(*errs, fmt.Errorf(
 				"field %s nests a config through %s; nest by value so the variables it reads are known from the type",
@@ -90,23 +119,34 @@ func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Valu
 }
 
 // bindLeaf builds the binding of a field that names a variable.
-func bindLeaf(field reflect.StructField, name, options, prefix string, value reflect.Value) binding {
-	required := hasOption(options, "required")
-	notEmpty := hasOption(options, "notEmpty")
+func bindLeaf(field reflect.StructField, name, options, prefix, path string, value reflect.Value) binding {
+	var (
+		notEmpty        = hasOption(options, "notEmpty")
+		secret          = isSecretType(field.Type)
+		separator       = separatorOf(field)
+		keyValSeparator = keyValSeparatorOf(field)
+	)
+
+	variable := Variable{
+		Name:     prefix + name,
+		Type:     field.Type.String(),
+		Required: notEmpty || hasOption(options, "required"),
+		Secret:   secret,
+	}
+	// A secret publishes no default. Its rendering would be a mask, which reads
+	// as a value and would be pasted into a deployment as one.
+	if !secret {
+		variable.Default = renderValue(value, separator, keyValSeparator)
+		variable.HasDefault = !value.IsZero()
+	}
 
 	return binding{
-		Variable: Variable{
-			Name:       prefix + name,
-			Type:       field.Type.String(),
-			Required:   required || notEmpty,
-			Secret:     isSecretType(field.Type),
-			Default:    renderValue(value, separatorOf(field), keyValSeparatorOf(field)),
-			HasDefault: !value.IsZero(),
-		},
+		Variable:        variable,
+		field:           path + field.Name,
 		target:          value,
 		notEmpty:        notEmpty,
-		separator:       separatorOf(field),
-		keyValSeparator: keyValSeparatorOf(field),
+		separator:       separator,
+		keyValSeparator: keyValSeparator,
 	}
 }
 

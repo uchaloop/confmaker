@@ -94,6 +94,10 @@ ANALYTICS_ADDR
 `ProvideNamed` gives it a value tagged `name:"analytics"`, for replicas and
 additional instances of the same type.
 
+The name is both the prefix and the Fx tag, so it may hold only lowercase
+letters, digits, and `_ - .`, and may not start or end with a separator. A name
+written two ways would read one set of variables and answer to another tag.
+
 Override the prefix when it should not follow the name:
 
 ```go
@@ -125,6 +129,14 @@ array is rejected: how many variables it would read cannot be known from the
 type, and that is exactly what the strict check and the manifest rest on. Only a
 struct that names variables of its own counts, so an untagged field holding a
 decimal or a timestamp is skipped like any other untagged field.
+
+Two fields claiming one variable is rejected too - nesting the same struct twice
+and leaving `envPrefix` off the second is the usual way it happens:
+
+```text
+variable "APP_MAX_CONNS" is claimed by both Primary.MaxConns and Replica.MaxConns;
+give one of them an envPrefix
+```
 
 ### Maps
 
@@ -193,7 +205,12 @@ Secrets are reported as set or unset; their values are never written.
 config type itself:
 
 ```go
-for _, v := range confx.Manifest[pgfx.Config]("postgres") {
+variables, err := confx.Manifest[pgfx.Config]("postgres")
+if err != nil {
+	return err
+}
+
+for _, v := range variables {
 	fmt.Printf("%s=%s\n", v.Name, v.Default)
 }
 ```
@@ -211,7 +228,10 @@ options as `Provide`, so a manifest resolved with `WithPrefix` matches the
 instance provided with it.
 
 The manifest comes from the same traversal that fills the config, so a variable
-it lists is exactly a variable the config reads.
+it lists is exactly a variable the config reads. A declaration the application
+would refuse is refused here too, rather than yielding an empty file. A secret
+publishes no default: its rendering would be a mask, which reads as a value and
+would be pasted into a deployment as one.
 
 ## Secrets
 

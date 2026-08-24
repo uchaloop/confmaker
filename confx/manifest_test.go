@@ -41,6 +41,18 @@ func described[T any](t *testing.T, prefix string) []Variable {
 	return variables
 }
 
+// manifested is Manifest for a declaration the test expects to be valid.
+func manifested[T any](t *testing.T, name string, opts ...Option) []Variable {
+	t.Helper()
+
+	variables, err := Manifest[T](name, opts...)
+	if err != nil {
+		t.Fatalf("manifest: %v", err)
+	}
+
+	return variables
+}
+
 // bindError returns the error a T's declaration produces, failing when it binds
 // cleanly.
 func bindError[T any](t *testing.T) error {
@@ -65,7 +77,7 @@ func names(variables []Variable) []string {
 }
 
 func TestManifestListsVariablesInDeclarationOrder(t *testing.T) {
-	got := names(Manifest[manifestConfig]("postgres"))
+	got := names(manifested[manifestConfig](t, "postgres"))
 
 	want := []string{
 		"POSTGRES_HOST", "POSTGRES_POOL_MAX_CONNS", "POSTGRES_TIMEOUT", "POSTGRES_PASSWORD",
@@ -83,7 +95,7 @@ func TestManifestListsVariablesInDeclarationOrder(t *testing.T) {
 
 func TestManifestReportsFieldMetadata(t *testing.T) {
 	byName := make(map[string]Variable)
-	for _, variable := range Manifest[manifestConfig]("postgres") {
+	for _, variable := range manifested[manifestConfig](t, "postgres") {
 		byName[variable.Name] = variable
 	}
 
@@ -112,7 +124,7 @@ func TestManifestReportsFieldMetadata(t *testing.T) {
 }
 
 func TestManifestHonoursWithPrefix(t *testing.T) {
-	got := names(Manifest[manifestConfig]("analytics", WithPrefix("REPORTING_")))
+	got := names(manifested[manifestConfig](t, "analytics", WithPrefix("REPORTING_")))
 
 	if got[0] != "REPORTING_HOST" {
 		t.Fatalf("first variable = %q, want the overridden prefix", got[0])
@@ -122,7 +134,7 @@ func TestManifestHonoursWithPrefix(t *testing.T) {
 // TestManifestMatchesTheStrictCheck pins Manifest to what Module accepts: every
 // name a generator emits has to survive the check that runs at startup.
 func TestManifestMatchesTheStrictCheck(t *testing.T) {
-	for _, variable := range Manifest[manifestConfig]("postgres") {
+	for _, variable := range manifested[manifestConfig](t, "postgres") {
 		t.Setenv(variable.Name, "1")
 	}
 	t.Setenv("POSTGRES_HOST", "db:5432")
@@ -145,7 +157,7 @@ func TestManifestMatchesTheStrictCheck(t *testing.T) {
 func TestManifestRendersEnvExample(t *testing.T) {
 	var out strings.Builder
 
-	for _, variable := range Manifest[manifestConfig]("postgres") {
+	for _, variable := range manifested[manifestConfig](t, "postgres") {
 		out.WriteString(variable.Name)
 		out.WriteString("=")
 		out.WriteString(variable.Default)

@@ -29,6 +29,7 @@
 package confx
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -79,6 +80,10 @@ func ProvideNamed[T any](name string, opts ...Option) fx.Option {
 // it reads. Fx builds a group member only when the group is consumed, so the
 // manifest costs nothing in an application without Module.
 func provide[T any](name, tag string, opts []Option) fx.Option {
+	if err := checkName(name); err != nil {
+		return fx.Error(err)
+	}
+
 	prefix := prefixFor(name, opts)
 
 	return fx.Options(
@@ -146,6 +151,32 @@ func fillEnv[T any](cfg *T, prefix, label string) error {
 		if err := v.Validate(); err != nil {
 			return fmt.Errorf("config %q: %w", label, err)
 		}
+	}
+
+	return nil
+}
+
+// checkName rejects an instance name that would not make a sensible prefix or a
+// sensible Fx tag. The name is used for both, so one written two ways - or with
+// a space in it, which no variable can carry - would silently read nothing and
+// name a dependency nobody asks for.
+func checkName(name string) error {
+	if len(name) == 0 {
+		return errors.New("an instance name is required; it gives both the variable prefix and the Fx tag")
+	}
+
+	for _, r := range name {
+		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.'
+		if !valid {
+			return fmt.Errorf(
+				"instance name %q may hold only lowercase letters, digits, and _ - . (found %q)",
+				name, r,
+			)
+		}
+	}
+
+	if strings.ContainsAny(name[:1]+name[len(name)-1:], "_-.") {
+		return fmt.Errorf("instance name %q may not start or end with a separator", name)
 	}
 
 	return nil

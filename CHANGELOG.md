@@ -44,6 +44,18 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Two fields claiming one variable - nesting the same struct twice and leaving
+  `envPrefix` off the second - was accepted. One value filled both fields and the
+  manifest listed the name twice. It is now refused, naming both declarations.
+- A secret no longer publishes a default. Its rendering is a mask, which reads as
+  a value and would have been pasted into a deployment as one.
+- `confx.Manifest` returns an error instead of an empty list for a declaration
+  the application would refuse, so a generator fails rather than writing an empty
+  file. Its signature is now `([]Variable, error)`.
+- An instance name is checked: it gives both the variable prefix and the Fx tag,
+  so it may hold only lowercase letters, digits, and `_ - .` and may not start or
+  end with a separator. A name with a space in it read nothing and answered to a
+  tag nobody asked for.
 - The suggestion in an unknown-variable error is now stable: candidates at the
   same edit distance are broken by name instead of by map iteration order, which
   reported a different variable on every run.

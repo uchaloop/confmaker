@@ -66,7 +66,7 @@ func TestCustomTypeKeepsItsDefaultAndRendersIt(t *testing.T) {
 		t.Fatalf("price = %d, want the default", cfg.Price.cents)
 	}
 
-	variable := Manifest[moneyConfig]("app")[0]
+	variable := manifested[moneyConfig](t, "app")[0]
 	if variable.Default != "499" || !variable.HasDefault {
 		t.Fatalf("the default did not render through the type: %+v", variable)
 	}

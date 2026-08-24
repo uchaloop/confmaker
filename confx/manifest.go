@@ -47,12 +47,15 @@ type descriptor struct {
 // The options are the ones Provide takes, so a manifest taken with WithPrefix
 // matches the instance provided with the same option.
 //
-// It returns nothing for a T that is not a valid config; the same declaration is
-// reported as an error when the application builds it.
-func Manifest[T any](name string, opts ...Option) []Variable {
-	variables, _ := manifestOf[T](prefixFor(name, opts))
+// A declaration the application would refuse - a default in a tag, a config
+// nested through a pointer, two fields claiming one variable - is refused here
+// too, so a generator fails instead of writing an empty file.
+func Manifest[T any](name string, opts ...Option) ([]Variable, error) {
+	if err := checkName(name); err != nil {
+		return nil, err
+	}
 
-	return variables
+	return manifestOf[T](prefixFor(name, opts))
 }
 
 // manifestOf binds a defaulted T under prefix and returns the variables it
