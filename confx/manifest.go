@@ -42,6 +42,23 @@ type descriptor struct {
 	open bool
 }
 
+// Manifest returns the environment variables a T built under name reads, in the
+// order the type declares them. It is the same manifest Module checks and
+// WithDump prints, resolved without building an application - generate a
+// .env.example, a deployment's ConfigMap, or a documentation table from it.
+//
+// The options are the ones Provide takes, so a manifest taken with WithPrefix
+// matches the instance provided with the same option.
+//
+// A nested collection of structs contributes no variables: the env parser
+// numbers those per element (PREFIX_0_FIELD), so their names follow how many
+// elements are configured rather than T.
+func Manifest[T any](name string, opts ...Option) []Variable {
+	prefix, _ := resolve(name, opts)
+
+	return describe(reflect.TypeFor[T](), prefix)
+}
+
 // manifest walks configType and returns the variables it reads under prefix. It
 // mirrors how the env parser traverses a struct: a field with an env tag is a
 // leaf, an unexported field is skipped, and a struct field without an env tag is
@@ -53,8 +70,8 @@ func manifest(configType reflect.Type, prefix string) (variables []Variable, ope
 	return walk.variables, walk.open
 }
 
-// describe is manifest without the open flag, for tests and callers that only
-// need the variables.
+// describe is manifest without the open flag, for callers that only need the
+// variables.
 func describe(configType reflect.Type, prefix string) []Variable {
 	variables, _ := manifest(configType, prefix)
 

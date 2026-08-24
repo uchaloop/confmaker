@@ -46,6 +46,10 @@ them the environment-named configuration groups that
 - `confx.WithDump` writes every variable the application reads, its type, its
   current value, and where that value comes from. Secrets are reported as set or
   unset and never printed.
+- `confx.Manifest[T](name)` returns that same list without building an
+  application - name, type, required, secret, and declared default, in
+  declaration order - so a `.env.example`, a ConfigMap, or a documentation table
+  can be generated from the config type. It takes the options `Provide` takes.
 
 ## [0.3.1] - 2026-08-06
 

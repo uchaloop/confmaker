@@ -127,6 +127,29 @@ postgres  POSTGRES_POOL_MAX_CONNS  int32          (unset)   zero value
 
 Secrets are reported as set or unset; their values are never written.
 
+## Generating from the manifest
+
+`Manifest` resolves the same list without building an application, so a
+`.env.example`, a ConfigMap, or a documentation table can be generated from the
+config type itself:
+
+```go
+for _, v := range confx.Manifest[pgfx.Config]("postgres") {
+	fmt.Printf("%s=%s\n", v.Name, v.Default)
+}
+```
+
+```text
+POSTGRES_HOST=
+POSTGRES_POOL_MAX_CONNS=2
+POSTGRES_PASSWORD=
+```
+
+Variables come in declaration order, and each carries its Go type, whether it is
+required, whether it holds a secret, and its declared `envDefault`. It takes the
+same options as `Provide`, so a manifest resolved with `WithPrefix` matches the
+instance provided with it.
+
 ## Secrets
 
 Use [`github.com/uchaloop/secret/v2`](https://github.com/uchaloop/secret) for
