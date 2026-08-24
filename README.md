@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/uchaloop/confmaker.svg)](https://pkg.go.dev/github.com/uchaloop/confmaker)
-[![License: MIT](https://img.shields.io/badge/github/license/uchaloop/confmaker)](LICENSE)
+[![License: MIT](https://img.shields.io/github/license/uchaloop/confmaker)](LICENSE)
 
 Typed configuration for Go services: environment variables only, wired into Uber
 Fx, with validation and a strict check that catches misspelled variables at
@@ -84,6 +84,9 @@ type Config struct {
 POSTGRES_HOST
 POSTGRES_POOL_MAX_CONNS
 ```
+
+Nest by value. A pointer field stays nil in a config built from its zero value,
+so nothing behind it is read unless it also carries `env:",init"`.
 
 ### The strict check
 

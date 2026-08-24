@@ -9,7 +9,7 @@
 //	type Config struct {
 //		Host     string        `env:"HOST"`
 //		Database string        `env:"DATABASE"`
-//		Password secret.Secret `env:"PASSWORD,required"`
+//		Password secret.Secret `env:"PASSWORD,notEmpty"`
 //	}
 //
 // The tags are inert strings, so the library depends only on the secret type
