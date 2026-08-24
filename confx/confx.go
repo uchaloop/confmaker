@@ -56,12 +56,7 @@ func WithPrefix(prefix string) Option {
 // Use it for the common one-instance case (paired with a no-argument library
 // module); reach for ProvideNamed only when a second instance is needed.
 func Provide[T any](name string, opts ...Option) fx.Option {
-	prefix, label := resolve(name, opts)
-
-	return fx.Options(
-		fx.Provide(build[T](prefix, label)),
-		provideDescriptor[T](prefix, label),
-	)
+	return provide[T](name, ``, opts)
 }
 
 // ProvideNamed is Provide for an additional instance: it provides the config
@@ -69,49 +64,35 @@ func Provide[T any](name string, opts ...Option) fx.Option {
 // replicas and shards, e.g. ProvideNamed[Config]("replica") reads variables such
 // as REPLICA_HOST.
 func ProvideNamed[T any](name string, opts ...Option) fx.Option {
-	prefix, label := resolve(name, opts)
+	return provide[T](name, utilfx.NameTag(name), opts)
+}
+
+// provide registers the constructor of one instance under the given result tag -
+// empty for the default instance - together with the manifest of the variables
+// it reads. Fx builds a group member only when the group is consumed, so the
+// manifest costs nothing in an application without Module.
+func provide[T any](name, tag string, opts []Option) fx.Option {
+	prefix := prefixFor(name, opts)
 
 	return fx.Options(
 		fx.Provide(
-			fx.Annotate(
-				build[T](prefix, label),
-				fx.ResultTags(utilfx.NameTag(name)),
-			),
+			fx.Annotate(build[T](prefix, name), fx.ResultTags(tag)),
 		),
-		provideDescriptor[T](prefix, label),
-	)
-}
-
-// provideDescriptor feeds the manifest of one instance into the group Module
-// reads. Fx builds a group member only when the group is consumed, so this costs
-// nothing in an application that does not register Module.
-func provideDescriptor[T any](prefix, label string) fx.Option {
-	return fx.Provide(
-		fx.Annotate(
-			func() descriptor {
-				variables, open := manifest(reflect.TypeFor[T](), prefix)
-
-				return descriptor{
-					label:     label,
-					prefix:    prefix,
-					variables: variables,
-					open:      open,
-				}
-			},
-			fx.ResultTags(descriptorGroup),
+		fx.Provide(
+			fx.Annotate(describe[T](prefix, name), fx.ResultTags(descriptorGroup)),
 		),
 	)
 }
 
-// resolve applies opts over the prefix derived from name and returns the prefix
-// to read with and the label to name the instance in errors.
-func resolve(name string, opts []Option) (prefix, label string) {
+// prefixFor returns the environment prefix an instance reads with: the one
+// derived from its name, unless an option replaces it.
+func prefixFor(name string, opts []Option) string {
 	set := settings{prefix: defaultPrefix(name)}
 	for _, opt := range opts {
 		opt(&set)
 	}
 
-	return set.prefix, name
+	return set.prefix
 }
 
 // build returns the constructor that fills a T's env-tagged fields with the
@@ -120,11 +101,23 @@ func build[T any](prefix, label string) func() (T, error) {
 	return func() (T, error) {
 		var cfg T
 
-		if err := fillEnv(&cfg, prefix, label); err != nil {
-			return cfg, err
-		}
+		err := fillEnv(&cfg, prefix, label)
 
-		return cfg, nil
+		return cfg, err
+	}
+}
+
+// describe returns the constructor of one instance's manifest.
+func describe[T any](prefix, label string) func() descriptor {
+	return func() descriptor {
+		variables, open := manifest(reflect.TypeFor[T](), prefix)
+
+		return descriptor{
+			label:     label,
+			prefix:    prefix,
+			variables: variables,
+			open:      open,
+		}
 	}
 }
 

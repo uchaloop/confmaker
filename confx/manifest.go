@@ -55,9 +55,9 @@ type descriptor struct {
 // without the init option, which stays nil in a config built from its zero
 // value.
 func Manifest[T any](name string, opts ...Option) []Variable {
-	prefix, _ := resolve(name, opts)
+	variables, _ := manifest(reflect.TypeFor[T](), prefixFor(name, opts))
 
-	return describe(reflect.TypeFor[T](), prefix)
+	return variables
 }
 
 // manifest walks configType and returns the variables it reads under prefix. It
@@ -78,14 +78,6 @@ func manifest(configType reflect.Type, prefix string) (variables []Variable, ope
 	walk.walk(configType, prefix)
 
 	return walk.variables, walk.open
-}
-
-// describe is manifest without the open flag, for callers that only need the
-// variables.
-func describe(configType reflect.Type, prefix string) []Variable {
-	variables, _ := manifest(configType, prefix)
-
-	return variables
 }
 
 type walker struct {
