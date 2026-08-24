@@ -65,6 +65,15 @@ func Manifest[T any](name string, opts ...Option) []Variable {
 // leaf, an unexported field is skipped, and a struct field without an env tag is
 // descended into, extending the prefix with its envPrefix tag.
 func manifest(configType reflect.Type, prefix string) (variables []Variable, open bool) {
+	// A T the parser cannot read at all - a pointer, a map, anything but a struct
+	// - yields no variables. Reporting an empty manifest would make the strict
+	// check call every variable under the prefix unknown and blame the
+	// environment for what is a mistake in the code, so the prefix is left alone
+	// and the constructor gets to report the real problem.
+	if configType.Kind() != reflect.Struct {
+		return nil, true
+	}
+
 	walk := walker{seen: make(map[reflect.Type]bool)}
 	walk.walk(configType, prefix)
 

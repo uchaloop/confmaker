@@ -29,9 +29,16 @@ type ModuleOption func(*moduleSettings)
 // AllowUnknown exempts variables with the given prefixes from the strict check.
 // Use it when a deployment shares one environment across several binaries and a
 // variable that belongs to a sibling process would otherwise be reported.
+//
+// An empty prefix is ignored rather than honoured: it matches every variable and
+// would turn the check off without saying so.
 func AllowUnknown(prefixes ...string) ModuleOption {
 	return func(s *moduleSettings) {
-		s.allowed = append(s.allowed, prefixes...)
+		for _, prefix := range prefixes {
+			if len(prefix) != 0 {
+				s.allowed = append(s.allowed, prefix)
+			}
+		}
 	}
 }
 
@@ -133,7 +140,10 @@ func hint(name string, known map[string]bool) string {
 	best, bestDistance := "", maxDistance+1
 
 	for candidate := range known {
-		if distance := editDistance(name, candidate); distance < bestDistance {
+		distance := editDistance(name, candidate)
+		// Map iteration is unordered, so ties are broken by name: the same typo
+		// has to produce the same message on every run.
+		if distance < bestDistance || (distance == bestDistance && candidate < best) {
 			best, bestDistance = candidate, distance
 		}
 	}

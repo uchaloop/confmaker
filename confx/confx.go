@@ -39,7 +39,9 @@ type Option func(*settings)
 
 // WithPrefix overrides the environment-variable prefix derived from the instance
 // name. Pass an empty string to read env tags with no prefix at all (shared,
-// global variables).
+// global variables); such an instance owns no prefix of its own and so is left
+// out of Module's strict check, which would otherwise claim the whole
+// environment.
 func WithPrefix(prefix string) Option {
 	return func(s *settings) {
 		s.prefix = prefix

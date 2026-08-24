@@ -65,7 +65,9 @@ Override the prefix when it should not follow the name:
 confx.Provide[otherlib.Config]("analytics", confx.WithPrefix("REPORTING_"))
 ```
 
-`WithPrefix("")` reads the `env` tags with no prefix at all.
+`WithPrefix("")` reads the `env` tags with no prefix at all. Such an instance
+owns no prefix, so the strict check below skips it - it would otherwise claim
+every variable in the environment.
 
 ### Nested configuration
 

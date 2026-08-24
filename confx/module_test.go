@@ -304,6 +304,54 @@ func TestDescribeMatchesParserOnIgnoredField(t *testing.T) {
 	}
 }
 
+func TestModuleHintIsDeterministic(t *testing.T) {
+	// Three candidates sit at the same edit distance from the typo, so an
+	// unordered scan of the known names would report a different one per run.
+	known := map[string]bool{"APP_HOST": true, "APP_MOST": true, "APP_COST": true}
+
+	first := hint("APP_XOST", known)
+	for range 100 {
+		if got := hint("APP_XOST", known); got != first {
+			t.Fatalf("hint changed between runs: %q then %q", first, got)
+		}
+	}
+	if !strings.Contains(first, "APP_COST") {
+		t.Fatalf("hint = %q, want the first candidate by name among the ties", first)
+	}
+}
+
+func TestAllowUnknownIgnoresEmptyPrefix(t *testing.T) {
+	t.Setenv("POSTGRES_HOST", "db:5432")
+	t.Setenv("POSTGRES_PASSWORD", "s3cr3t")
+	t.Setenv("POSTGRES_HSOT", "typo")
+
+	// An empty prefix matches everything; honouring it would turn the check off
+	// without saying so.
+	err := runModule(t, AllowUnknown(""))
+	if err == nil || !strings.Contains(err.Error(), "POSTGRES_HSOT") {
+		t.Fatalf("an empty prefix silently disabled the check: %v", err)
+	}
+}
+
+func TestModuleLeavesNonStructConfigToItsConstructor(t *testing.T) {
+	t.Setenv("THING_HOST", "db:5432")
+
+	// A pointer T is a mistake in the code, not in the environment. The check
+	// must not bury the parser's own report under a list of "unknown" variables.
+	err := fx.New(
+		fx.NopLogger,
+		Module(),
+		Provide[*strictConfig]("thing"),
+		fx.Invoke(func(*strictConfig) {}),
+	).Err()
+	if err == nil {
+		t.Fatal("expected a pointer config to fail")
+	}
+	if strings.Contains(err.Error(), "unknown configuration variable") {
+		t.Fatalf("the environment was blamed for a mistake in the code: %v", err)
+	}
+}
+
 func TestModuleSkipsOpenConfig(t *testing.T) {
 	type shard struct {
 		Host string `env:"HOST"`

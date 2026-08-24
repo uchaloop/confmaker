@@ -7,6 +7,17 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- The suggestion in an unknown-variable error is now stable: candidates at the
+  same edit distance are broken by name instead of by map iteration order, which
+  reported a different variable on every run.
+- `confx.AllowUnknown("")` no longer disables the strict check. An empty prefix
+  matches every variable, so it is ignored rather than honoured.
+- A `T` the env parser cannot read - a pointer, a map, anything but a struct -
+  no longer makes the strict check report every variable under its prefix as
+  unknown. The prefix is skipped so the constructor reports the actual problem.
+
 ## [0.4.0] - 2026-08-24
 
 Configuration is now read from the environment only. Files are gone, and with
