@@ -150,7 +150,7 @@ func bindLeaf(
 	variable := Variable{
 		Name:     prefix + name,
 		Type:     field.Type.String(),
-		Required: notEmpty || hasOption(options, "required"),
+		Required: notEmpty || hasOption(options, "require"),
 		Secret:   secret,
 	}
 	// A secret publishes no default. Its rendering would be a mask, which reads
@@ -270,7 +270,7 @@ func keyValSeparatorOf(field reflect.StructField) string {
 }
 
 // checkOptions rejects an option the env tag does not define. An unrecognised
-// one would otherwise be ignored, so a misspelled "required" would leave the
+// one would otherwise be ignored, so a misspelled "require" would leave the
 // field optional and say nothing.
 func checkOptions(options string) error {
 	var errs []error
@@ -281,10 +281,10 @@ func checkOptions(options string) error {
 		current, rest, _ = strings.Cut(rest, ",")
 
 		switch current {
-		case "", "required", "notEmpty":
+		case "", "require", "notEmpty":
 		default:
 			errs = append(errs, fmt.Errorf(
-				"unknown env option %q; the tag takes required and notEmpty",
+				"unknown env option %q; the tag takes require and notEmpty",
 				current,
 			))
 		}

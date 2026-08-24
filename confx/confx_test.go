@@ -16,7 +16,7 @@ type widgetConfig struct {
 	Endpoint string `env:"ENDPOINT"`
 	Label    string
 	Limit    int32         `env:"LIMIT"`
-	Token    secret.Secret `env:"TOKEN,required"`
+	Token    secret.Secret `env:"TOKEN,require"`
 }
 
 func (c widgetConfig) Validate() error {
@@ -291,7 +291,7 @@ func TestProvideNestedStructPrefix(t *testing.T) {
 
 func TestProvideSecretWithoutEnvTagRemainsZero(t *testing.T) {
 	type config struct {
-		Endpoint    string        `env:"ENDPOINT,required"`
+		Endpoint    string        `env:"ENDPOINT,require"`
 		FromEnv     secret.Secret `env:"PASSWORD"`
 		WithoutEnv  secret.Secret `json:"password" yaml:"password"`
 		WithoutTags secret.Secret
@@ -391,7 +391,7 @@ func TestNotEmptyRejectsAnEmptyVariable(t *testing.T) {
 
 func TestRequiredIsAboutTheVariableNotTheValue(t *testing.T) {
 	type config struct {
-		Host string `env:"HOST,required"`
+		Host string `env:"HOST,require"`
 	}
 
 	// A default does not satisfy required: the deployment still has to supply it.
@@ -405,7 +405,7 @@ func TestRequiredIsAboutTheVariableNotTheValue(t *testing.T) {
 
 func TestFillReportsEveryProblemAtOnce(t *testing.T) {
 	type config struct {
-		Host    string `env:"HOST,required"`
+		Host    string `env:"HOST,require"`
 		Retries int    `env:"RETRIES"`
 	}
 

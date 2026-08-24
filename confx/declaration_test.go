@@ -159,8 +159,8 @@ func TestUnreadableTypeIsRefusedWhenBound(t *testing.T) {
 // still has to say which config it belongs to.
 func TestConfigErrorLabelsEveryLine(t *testing.T) {
 	type config struct {
-		Host string `env:"HOST,required"`
-		User string `env:"USER,required"`
+		Host string `env:"HOST,require"`
+		User string `env:"USER,require"`
 	}
 
 	var cfg config

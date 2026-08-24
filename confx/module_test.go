@@ -13,7 +13,7 @@ import (
 type strictConfig struct {
 	Host string        `env:"HOST"`
 	Port int           `env:"PORT"`
-	Pass secret.Secret `env:"PASSWORD,required"`
+	Pass secret.Secret `env:"PASSWORD,require"`
 }
 
 // SetDefaults gives Port a default the dump can report as coming from the code.

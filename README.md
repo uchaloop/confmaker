@@ -56,7 +56,7 @@ There is no `envDefault` tag - a default in a tag is invisible to code.
 
 ### Required values
 
-`required` fails the start when the variable is unset, `notEmpty` when it is
+`require` fails the start when the variable is unset, `notEmpty` when it is
 unset or empty. Both are about the *variable*, not the value: a default in
 `SetDefaults` satisfies neither, because the deployment is still expected to
 supply it.
@@ -172,7 +172,7 @@ first start, whether or not the environment happens to set the variable:
 | Refused | Because |
 |---|---|
 | `envDefault` on a field | a default belongs in `SetDefaults` |
-| an option other than `required` / `notEmpty` | `requred` would leave the field optional in silence |
+| an option other than `require` / `notEmpty` | `requred` would leave the field optional in silence |
 | two fields claiming one variable | one value would fill both |
 | a config nested through a pointer, slice, map or array | its variables cannot be known from the type |
 | a field of a type that cannot be read from text | it could never be filled |

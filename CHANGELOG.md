@@ -22,6 +22,9 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- The tag option that marks a variable as mandatory is , not
+  . An unrecognised option is now an error, so the old spelling is
+  reported rather than ignored.
 - Configuration is parsed by this module rather than by `caarlos0/env`, which
   leaves Fx and the secret type as the only dependencies. The traversal that
   fills a config is now the same one that describes it, so a manifest cannot

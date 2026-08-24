@@ -18,7 +18,7 @@ type manifestConfig struct {
 	} `envPrefix:"POOL_"`
 	Timeout  time.Duration `env:"TIMEOUT"`
 	Labels   map[string]string
-	Password secret.Secret `env:"PASSWORD,required"`
+	Password secret.Secret `env:"PASSWORD,require"`
 }
 
 // SetDefaults is where this config's defaults live, so code and tests see the

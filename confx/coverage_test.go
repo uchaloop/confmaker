@@ -203,7 +203,7 @@ func TestPointerToSecretIsMasked(t *testing.T) {
 // that a set variable never reaches.
 func TestDumpReportsWhereAValueComesFrom(t *testing.T) {
 	type config struct {
-		Host    string `env:"HOST,required"`
+		Host    string `env:"HOST,require"`
 		Timeout string `env:"TIMEOUT"`
 		Spare   string `env:"SPARE"`
 	}
