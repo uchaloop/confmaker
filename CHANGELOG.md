@@ -5,6 +5,17 @@ All notable changes to this module are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-08-25
+
+### Fixed
+
+- The tests no longer depend on the environment of the machine that runs them.
+  Module scans the real environment, so a test instance named "api" owned API_
+  and reported whatever was exported under it - API_TIMEOUT_MS, on the machine
+  where this surfaced. Test instances are named so that no environment can hold
+  their prefix. The one example that reads the process environment no longer
+  declares an output, because what it prints depends on the machine.
+
 ## [0.4.1] - 2026-08-25
 
 ### Added
@@ -160,7 +171,8 @@ its only dependencies.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/uchaloop/confmaker/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/uchaloop/confmaker/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/uchaloop/confmaker/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/uchaloop/confmaker/compare/v0.3.0...v0.3.1
