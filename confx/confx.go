@@ -29,8 +29,8 @@ func WithPrefix(prefix string) Option {
 
 // Provide builds a T from the environment, validates it if T has a Validate
 // method, and provides it into the container untagged - the default single
-// instance. The env prefix is derived from name, so Provide[Config]("postgres")
-// reads variables such as POSTGRES_HOST.
+// instance. The env prefix is derived from name, so Provide[Config]("store")
+// reads variables such as STORE_HOST.
 //
 // Use it for the common one-instance case (paired with a no-argument library
 // module); reach for ProvideNamed only when a second instance is needed.
@@ -213,7 +213,7 @@ func checkPrefix(prefix string) error {
 
 // defaultPrefix turns an instance name into an env prefix. A variable is written
 // with underscores whatever the name uses, so "main" -> "MAIN_",
-// "read-replica" -> "READ_REPLICA_", "db.postgres" -> "DB_POSTGRES_".
+// "read-replica" -> "READ_REPLICA_", "db.main" -> "DB_MAIN_".
 func defaultPrefix(name string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(name)) + "_"
 }

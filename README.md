@@ -55,12 +55,11 @@ The application names the instance, which gives the environment prefix:
 fx.New(
 	confx.Module(),
 
-	confx.Provide[store.Config]("store"),      // STORE_HOST, STORE_TIMEOUT, STORE_PASSWORD
-	confx.Provide[pgfx.Config]("postgres"),    // POSTGRES_HOST, POSTGRES_POOL_MAX_CONNS, ...
-	confx.ProvideNamed[pgfx.Config]("replica"),// REPLICA_HOST, ...
+	confx.Provide[store.Config]("store"),       // STORE_HOST, STORE_TIMEOUT, ...
+	confx.ProvideNamed[store.Config]("replica"),// REPLICA_HOST, REPLICA_TIMEOUT, ...
+	confx.Provide[app.Config]("app"),           // APP_SHUTDOWN_WAIT, ...
 
 	store.Module,
-	pgfx.Module,
 )
 ```
 
@@ -74,7 +73,7 @@ for either. Nothing else in the process reads the environment.
 declare:
 
 ```text
-unknown configuration variable "POSTGRES_HSOT" (did you mean "POSTGRES_HOST"?)
+unknown configuration variable "STORE_HSOT" (did you mean "STORE_HOST"?)
 ```
 
 Everything a declaration itself can get wrong is refused before any value is
@@ -86,8 +85,8 @@ Every problem is reported at once, one per line, each naming the config it
 belongs to:
 
 ```text
-config "postgres": required variable "POSTGRES_HOST" is not set
-config "postgres": timeout must be positive
+config "store": required variable "STORE_HOST" is not set
+config "store": timeout must be positive
 ```
 
 ## What it prints
@@ -96,10 +95,10 @@ config "postgres": timeout must be positive
 read:
 
 ```text
-INSTANCE  VARIABLE                 TYPE           VALUE     SOURCE
-postgres  POSTGRES_HOST            string         db:5432   env
-postgres  POSTGRES_PASSWORD        secret.Secret  (set)     env
-postgres  POSTGRES_POOL_MAX_CONNS  int32          2         default
+INSTANCE  VARIABLE            TYPE           VALUE          SOURCE
+store     STORE_HOST          string         store:9000     env
+store     STORE_PASSWORD      secret.Secret  (set)          env
+store     STORE_TIMEOUT       time.Duration  30s            default
 ```
 
 A secret is never printed: not here, not in the manifest, not in the error for a
@@ -110,13 +109,13 @@ value that would not parse.
 `confx.Manifest` resolves the same list without building an application:
 
 ```go
-variables, err := confx.Manifest[pgfx.Config]("postgres")
+variables, err := confx.Manifest[store.Config]("store")
 ```
 
 ```text
-POSTGRES_HOST=
-POSTGRES_POOL_MAX_CONNS=2
-POSTGRES_PASSWORD=
+STORE_HOST=
+STORE_TIMEOUT=30s
+STORE_PASSWORD=
 ```
 
 Each entry carries its Go type, whether it is required, whether it holds a

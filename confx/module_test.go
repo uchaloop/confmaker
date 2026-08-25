@@ -119,16 +119,18 @@ func TestModuleNestedPrefixesDoNotCollide(t *testing.T) {
 		BaseURL string `env:"BASE_URL"`
 	}
 
-	// OZON_ and OZON_CARD_STATUS_ overlap: a variable of the longer instance must
-	// not be reported as unknown for the shorter one.
-	t.Setenv("OZON_BASE_URL", "https://api")
-	t.Setenv("OZON_CARD_STATUS_BASE_URL", "https://api/cards")
+	// CONFXAPI_ and CONFXAPI_STATUS_ overlap: a variable of the longer instance
+	// must not be reported as unknown for the shorter one. The names are scoped
+	// to this package because the check scans the real environment, and a
+	// short prefix collides with whatever the developer happens to export.
+	t.Setenv("CONFXAPI_BASE_URL", "https://api")
+	t.Setenv("CONFXAPI_STATUS_BASE_URL", "https://api/cards")
 
 	err := fx.New(
 		fx.NopLogger,
 		Module(),
-		Provide[outer]("ozon"),
-		ProvideNamed[outer]("ozon_card_status"),
+		Provide[outer]("confxapi"),
+		ProvideNamed[outer]("confxapi_status"),
 		fx.Invoke(func(outer) {}),
 	).Err()
 	if err != nil {

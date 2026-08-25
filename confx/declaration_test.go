@@ -98,7 +98,7 @@ func TestInstanceNameIsChecked(t *testing.T) {
 		})
 	}
 
-	for _, name := range []string{"postgres", "read-replica", "daemon_ozon_card_publish", "db.main", "pg2"} {
+	for _, name := range []string{"postgres", "read-replica", "daemon_card_publish", "db.main", "pg2"} {
 		if err := checkName(name); err != nil {
 			t.Errorf("%q rejected: %v", name, err)
 		}

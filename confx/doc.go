@@ -65,7 +65,7 @@ config in Go and never goes near a loader.
 Provide gives the container an untagged value, the single default instance.
 ProvideNamed gives it a value tagged name:"<name>", for replicas and additional
 instances of the same type. The instance name gives the environment prefix, so
-Provide[Config]("postgres") reads POSTGRES_HOST and ProvideNamed[Config]("replica")
+Provide[Config]("store") reads STORE_HOST and ProvideNamed[Config]("replica")
 reads REPLICA_HOST.
 
 Because the name is both the prefix and the Fx tag, it may hold only lowercase
@@ -84,8 +84,8 @@ envPrefix extends the prefix for a nested struct:
 		Pool PoolConfig `envPrefix:"POOL_"`
 	}
 
-	POSTGRES_HOST
-	POSTGRES_POOL_MAX_CONNS
+	STORE_HOST
+	STORE_POOL_MAX_CONNS
 
 Nest by value: how many variables a config reads has to be known from its type,
 which a pointer or a collection cannot promise.
@@ -94,8 +94,8 @@ A slice splits on envSeparator, "," by default. A map reads from one variable,
 splitting entries the same way and a key from its value on envKeyValSeparator,
 ":" by default:
 
-	OZON_BROKERS=a:9092,b:9092
-	OZON_LABELS=env:prod,team:core
+	STORE_BROKERS=a:9092,b:9092
+	STORE_LABELS=env:prod,team:core
 
 A duplicate key is an error, and a key or value padded with whitespace is
 reported rather than trimmed, so "env: prod" says so instead of quietly yielding
@@ -125,7 +125,7 @@ Module compares the environment against the manifest the Provide calls register.
 A variable that starts with a prefix the application owns but matches no field
 fails the start:
 
-	unknown configuration variable "POSTGRES_HSOT" (did you mean "POSTGRES_HOST"?)
+	unknown configuration variable "STORE_HSOT" (did you mean "STORE_HOST"?)
 
 Variables outside the application's own prefixes are never examined. Register
 Module before the Provide calls it covers, so the check runs ahead of the
