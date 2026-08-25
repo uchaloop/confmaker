@@ -121,10 +121,10 @@ func TestProvideNamedTagsInstance(t *testing.T) {
 }
 
 func TestProvideNamedAndDefaultCoexist(t *testing.T) {
-	t.Setenv("MAIN_ENDPOINT", "main:9000")
-	t.Setenv("MAIN_TOKEN", "main-secret")
-	t.Setenv("REPLICA_ENDPOINT", "replica:9000")
-	t.Setenv("REPLICA_TOKEN", "replica-secret")
+	t.Setenv("CONFXMAIN_ENDPOINT", "main:9000")
+	t.Setenv("CONFXMAIN_TOKEN", "main-secret")
+	t.Setenv("CONFXREPLICA_ENDPOINT", "replica:9000")
+	t.Setenv("CONFXREPLICA_TOKEN", "replica-secret")
 
 	var (
 		main    widgetConfig
@@ -132,11 +132,11 @@ func TestProvideNamedAndDefaultCoexist(t *testing.T) {
 	)
 	app := fx.New(
 		fx.NopLogger,
-		Provide[widgetConfig]("main"),
-		ProvideNamed[widgetConfig]("replica"),
+		Provide[widgetConfig]("confxmain"),
+		ProvideNamed[widgetConfig]("confxreplica"),
 		fx.Invoke(fx.Annotate(
 			func(m, r widgetConfig) { main, replica = m, r },
-			fx.ParamTags("", nameTag("replica")),
+			fx.ParamTags("", nameTag("confxreplica")),
 		)),
 	)
 	if app.Err() != nil {
@@ -163,10 +163,10 @@ func TestProvideDerivesPrefixFromDashedName(t *testing.T) {
 }
 
 func TestProvideWithPrefixOverridesName(t *testing.T) {
-	t.Setenv("REPORTING_ENDPOINT", "reporting:9000")
-	t.Setenv("REPORTING_TOKEN", "s3cr3t")
+	t.Setenv("CONFXREPORTING_ENDPOINT", "reporting:9000")
+	t.Setenv("CONFXREPORTING_TOKEN", "s3cr3t")
 
-	cfg, err := runProvide(t, "analytics", WithPrefix("REPORTING_"))
+	cfg, err := runProvide(t, "analytics", WithPrefix("CONFXREPORTING_"))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -271,13 +271,13 @@ func TestProvideNestedStructPrefix(t *testing.T) {
 		Pool poolConfig `envPrefix:"POOL_"`
 	}
 
-	t.Setenv("POSTGRES_HOST", "db:5432")
-	t.Setenv("POSTGRES_POOL_MAX_CONNS", "4")
+	t.Setenv("CONFXPOSTGRES_HOST", "db:5432")
+	t.Setenv("CONFXPOSTGRES_POOL_MAX_CONNS", "4")
 
 	var got config
 	app := fx.New(
 		fx.NopLogger,
-		Provide[config]("postgres"),
+		Provide[config]("confxpostgres"),
 		fx.Invoke(func(cfg config) { got = cfg }),
 	)
 	if app.Err() != nil {
@@ -336,7 +336,7 @@ func (c *defaultedConfig) SetDefaults() {
 func TestSetDefaultsSurvivesAnUnsetVariable(t *testing.T) {
 	// Nothing is set at all.
 	var cfg defaultedConfig
-	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
@@ -346,11 +346,11 @@ func TestSetDefaultsSurvivesAnUnsetVariable(t *testing.T) {
 }
 
 func TestSetVariableOverridesTheDefault(t *testing.T) {
-	t.Setenv("APP_HOST", "db:5432")
-	t.Setenv("APP_RETRIES", "5")
+	t.Setenv("CONFXAPP_HOST", "db:5432")
+	t.Setenv("CONFXAPP_RETRIES", "5")
 
 	var cfg defaultedConfig
-	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
@@ -363,10 +363,10 @@ func TestSetVariableOverridesTheDefault(t *testing.T) {
 }
 
 func TestEmptyVariableAssignsTheEmptyValue(t *testing.T) {
-	t.Setenv("APP_HOST", "")
+	t.Setenv("CONFXAPP_HOST", "")
 
 	var cfg defaultedConfig
-	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
@@ -380,10 +380,10 @@ func TestNotEmptyRejectsAnEmptyVariable(t *testing.T) {
 		Host string `env:"HOST,notEmpty"`
 	}
 
-	t.Setenv("APP_HOST", "")
+	t.Setenv("CONFXAPP_HOST", "")
 
 	var cfg config
-	err := fillEnv(&cfg, "APP_", "app")
+	err := fillEnv(&cfg, "CONFXAPP_", "confxapp")
 	if err == nil {
 		t.Fatal("an empty value passed notEmpty")
 	}
@@ -398,7 +398,7 @@ func TestRequiredIsAboutTheVariableNotTheValue(t *testing.T) {
 	var cfg config
 	cfg.Host = "seeded"
 
-	if err := fillEnv(&cfg, "APP_", "app"); err == nil {
+	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err == nil {
 		t.Fatal("a seeded value satisfied required")
 	}
 }
@@ -409,14 +409,14 @@ func TestFillReportsEveryProblemAtOnce(t *testing.T) {
 		Retries int    `env:"RETRIES"`
 	}
 
-	t.Setenv("APP_RETRIES", "many")
+	t.Setenv("CONFXAPP_RETRIES", "many")
 
 	var cfg config
-	err := fillEnv(&cfg, "APP_", "app")
+	err := fillEnv(&cfg, "CONFXAPP_", "confxapp")
 	if err == nil {
 		t.Fatal("expected both problems to fail the build")
 	}
-	if !strings.Contains(err.Error(), "APP_HOST") || !strings.Contains(err.Error(), "APP_RETRIES") {
+	if !strings.Contains(err.Error(), "CONFXAPP_HOST") || !strings.Contains(err.Error(), "CONFXAPP_RETRIES") {
 		t.Fatalf("only one of two problems was reported: %v", err)
 	}
 }
@@ -426,10 +426,10 @@ func TestParseErrorNeverEchoesASecret(t *testing.T) {
 		Count secret.Secret `env:"COUNT"`
 	}
 
-	t.Setenv("APP_COUNT", "s3cr3t")
+	t.Setenv("CONFXAPP_COUNT", "s3cr3t")
 
 	var cfg config
-	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err != nil {
 		t.Fatalf("a secret decodes any text: %v", err)
 	}
 	if cfg.Count.Reveal() != "s3cr3t" {

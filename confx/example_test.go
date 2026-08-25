@@ -2,7 +2,6 @@ package confx_test
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/uchaloop/confmaker/confx"
@@ -46,13 +45,11 @@ var StoreModule = fx.Module("store",
 
 // An application wires the library up by naming the instance. The name gives the
 // environment prefix, so "store" reads STORE_HOST and the rest of STORE_*.
+//
+// The example declares no output: it reads the process environment, so what it
+// prints depends on the machine it runs on.
 func Example() {
-	os.Setenv("STORE_HOST", "store:9000")
-	defer os.Unsetenv("STORE_HOST")
-
-	var store *Store
-
-	app := fx.New(
+	fx.New(
 		fx.NopLogger,
 
 		// Module first: it checks the environment against what the Provide calls
@@ -63,18 +60,8 @@ func Example() {
 		confx.Provide[StoreConfig]("store"),
 		StoreModule,
 
-		fx.Populate(&store),
+		fx.Invoke(func(*Store) {}),
 	)
-	if err := app.Err(); err != nil {
-		fmt.Println(err)
-
-		return
-	}
-
-	fmt.Println(store.addr)
-
-	// Output:
-	// store:9000
 }
 
 // A second instance of the same type reads its own prefix and arrives under an

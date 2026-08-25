@@ -22,7 +22,7 @@ func TestBindRejectsACollision(t *testing.T) {
 	}
 
 	err := bindError[config](t)
-	if !strings.Contains(err.Error(), "APP_MAX_CONNS") {
+	if !strings.Contains(err.Error(), "CONFXAPP_MAX_CONNS") {
 		t.Fatalf("the error does not name the variable: %v", err)
 	}
 	if !strings.Contains(err.Error(), "Replica.MaxConns") || !strings.Contains(err.Error(), "Spare.MaxConns") {
@@ -39,8 +39,8 @@ func TestBindAllowsTheSameNameUnderDifferentPrefixes(t *testing.T) {
 		Replica pool `envPrefix:"REPLICA_"`
 	}
 
-	got := names(described[config](t, "APP_"))
-	if len(got) != 2 || got[0] != "APP_PRIMARY_MAX_CONNS" || got[1] != "APP_REPLICA_MAX_CONNS" {
+	got := names(described[config](t, "CONFXAPP_"))
+	if len(got) != 2 || got[0] != "CONFXAPP_PRIMARY_MAX_CONNS" || got[1] != "CONFXAPP_REPLICA_MAX_CONNS" {
 		t.Fatalf("manifest = %v", got)
 	}
 }
@@ -52,7 +52,7 @@ func TestSecretPublishesNoDefault(t *testing.T) {
 		Password secret.Secret `env:"PASSWORD"`
 	}
 
-	variable := described[config](t, "APP_")[0]
+	variable := described[config](t, "CONFXAPP_")[0]
 	if len(variable.Default) != 0 || variable.HasDefault {
 		t.Fatalf("a secret published a default: %+v", variable)
 	}
@@ -69,7 +69,7 @@ func TestManifestReportsAnInvalidDeclaration(t *testing.T) {
 		Shards []pool
 	}
 
-	variables, err := Manifest[config]("app")
+	variables, err := Manifest[config]("confxapp")
 	if err == nil {
 		t.Fatal("an invalid declaration produced a manifest instead of an error")
 	}
@@ -164,7 +164,7 @@ func TestConfigErrorLabelsEveryLine(t *testing.T) {
 	}
 
 	var cfg config
-	err := fillEnv(&cfg, "APP_", "postgres")
+	err := fillEnv(&cfg, "CONFXAPP_", "confxpostgres")
 	if err == nil {
 		t.Fatal("expected both variables to be reported")
 	}
@@ -175,7 +175,7 @@ func TestConfigErrorLabelsEveryLine(t *testing.T) {
 	}
 
 	for _, line := range lines {
-		if !strings.HasPrefix(line, `config "postgres":`) {
+		if !strings.HasPrefix(line, `config "confxpostgres":`) {
 			t.Errorf("line is not attributed to its config: %q", line)
 		}
 	}
@@ -185,20 +185,20 @@ func TestConfigErrorLabelsEveryLine(t *testing.T) {
 // instance declares, so two instances on one prefix would hide each other's
 // typos. Separators normalise, which is how two distinct names get there.
 func TestTwoInstancesMayNotShareAPrefix(t *testing.T) {
-	t.Setenv("READ_REPLICA_HOST", "db:5432")
-	t.Setenv("READ_REPLICA_PASSWORD", "s3cr3t")
+	t.Setenv("CONFX_REPLICA_HOST", "db:5432")
+	t.Setenv("CONFX_REPLICA_PASSWORD", "s3cr3t")
 
 	err := fx.New(
 		fx.NopLogger,
 		Module(),
-		Provide[strictConfig]("read-replica"),
-		ProvideNamed[strictConfig]("read_replica"),
+		Provide[strictConfig]("confx-replica"),
+		ProvideNamed[strictConfig]("confx_replica"),
 		fx.Invoke(func(strictConfig) {}),
 	).Err()
 	if err == nil {
 		t.Fatal("two instances read one prefix and the check said nothing")
 	}
-	if !strings.Contains(err.Error(), "READ_REPLICA_") {
+	if !strings.Contains(err.Error(), "CONFX_REPLICA_") {
 		t.Fatalf("the error does not name the shared prefix: %v", err)
 	}
 }
@@ -227,7 +227,7 @@ func TestDeclarationErrorsNameTheFieldPath(t *testing.T) {
 			Shards []shard
 		}
 		type config struct {
-			Cluster inner `envPrefix:"CLUSTER_"`
+			Cluster inner `envPrefix:"CONFXCLUSTER_"`
 		}
 
 		if err := bindError[config](t); !strings.Contains(err.Error(), "field Cluster.Shards") {
@@ -269,7 +269,7 @@ func TestAnEmptyEnvTagIsNotConfiguration(t *testing.T) {
 	}
 
 	// No options, no name: the same as no tag at all.
-	if got := names(described[config](t, "APP_")); len(got) != 1 || got[0] != "APP_HOST" {
+	if got := names(described[config](t, "CONFXAPP_")); len(got) != 1 || got[0] != "CONFXAPP_HOST" {
 		t.Fatalf("manifest = %v, want only APP_HOST", got)
 	}
 }

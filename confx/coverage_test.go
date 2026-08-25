@@ -21,12 +21,12 @@ func TestCustomSeparators(t *testing.T) {
 		Plain   map[string]string `env:"PLAIN"`
 	}
 
-	t.Setenv("APP_BROKERS", "a:9092;b:9092")
-	t.Setenv("APP_TIERS", "basic=1|pro=9")
-	t.Setenv("APP_PLAIN", "k:v")
+	t.Setenv("CONFXAPP_BROKERS", "a:9092;b:9092")
+	t.Setenv("CONFXAPP_TIERS", "basic=1|pro=9")
+	t.Setenv("CONFXAPP_PLAIN", "k:v")
 
 	var cfg config
-	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
@@ -133,7 +133,7 @@ func TestDefaultsRenderForCollections(t *testing.T) {
 	timeout := 30 * time.Second
 	cfg.Timeout = &timeout
 
-	bindings, err := bind(reflect.ValueOf(&cfg).Elem(), "APP_")
+	bindings, err := bind(reflect.ValueOf(&cfg).Elem(), "CONFXAPP_")
 	if err != nil {
 		t.Fatalf("bind: %v", err)
 	}
@@ -144,11 +144,11 @@ func TestDefaultsRenderForCollections(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"APP_BROKERS": "a:9092;b:9092",
-		"APP_TIERS":   "basic:1,pro:9",
-		"APP_TIMEOUT": "30s",
-		"APP_ABSENT":  "",
-		"APP_LABELS":  "",
+		"CONFXAPP_BROKERS": "a:9092;b:9092",
+		"CONFXAPP_TIERS":   "basic:1,pro:9",
+		"CONFXAPP_TIMEOUT": "30s",
+		"CONFXAPP_ABSENT":  "",
+		"CONFXAPP_LABELS":  "",
 	}
 	for name, expected := range want {
 		if rendered[name] != expected {
@@ -164,10 +164,10 @@ func TestParseErrorNeverCarriesASecretValue(t *testing.T) {
 
 	// secret.Secret decodes anything, so the guarantee is checked through the
 	// dump and the manifest instead, and through a value that fails elsewhere.
-	t.Setenv("APP_PASSWORD", "hunter2")
+	t.Setenv("CONFXAPP_PASSWORD", "hunter2")
 
 	var cfg config
-	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
@@ -176,7 +176,7 @@ func TestParseErrorNeverCarriesASecretValue(t *testing.T) {
 	app := fx.New(
 		fx.NopLogger,
 		Module(WithDump(&out)),
-		Provide[config]("app"),
+		Provide[config]("confxapp"),
 		fx.Invoke(func(config) {}),
 	)
 	if app.Err() != nil {
@@ -193,7 +193,7 @@ func TestPointerToSecretIsMasked(t *testing.T) {
 		Password *secret.Secret `env:"PASSWORD"`
 	}
 
-	variables := described[config](t, "APP_")
+	variables := described[config](t, "CONFXAPP_")
 	if !variables[0].Secret {
 		t.Fatal("a pointer to a secret was not recognised as one")
 	}
@@ -214,7 +214,7 @@ func TestDumpReportsWhereAValueComesFrom(t *testing.T) {
 	app := fx.New(
 		fx.NopLogger,
 		Module(WithDump(&out)),
-		Provide[config]("app"),
+		Provide[config]("confxapp"),
 		fx.Invoke(func(config) {}),
 	)
 	if app.Err() == nil {
@@ -235,22 +235,22 @@ func TestDumpReportsWhereAValueComesFrom(t *testing.T) {
 // unit it is.
 func TestParseErrorNeverNamesASecretValue(t *testing.T) {
 	b := binding{
-		Variable: Variable{Name: "APP_PASSWORD", Type: "secret.Secret", Secret: true},
+		Variable: Variable{Name: "CONFXAPP_PASSWORD", Type: "secret.Secret", Secret: true},
 	}
 
 	err := describeParseError(b, errors.New("\"hunter2\" is not valid"))
 	if strings.Contains(err.Error(), "hunter2") {
 		t.Fatalf("the value reached the error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "APP_PASSWORD") {
+	if !strings.Contains(err.Error(), "CONFXAPP_PASSWORD") {
 		t.Fatalf("the error does not name the variable: %v", err)
 	}
 }
 
 func TestHintStaysSilentWithoutACloseCandidate(t *testing.T) {
-	known := map[string]bool{"APP_HOST": true}
+	known := map[string]bool{"CONFXAPP_HOST": true}
 
-	if got := hint("APP_SOMETHING_ENTIRELY_ELSE", known); len(got) != 0 {
+	if got := hint("CONFXAPP_SOMETHING_ENTIRELY_ELSE", known); len(got) != 0 {
 		t.Fatalf("a distant name was suggested: %q", got)
 	}
 }
