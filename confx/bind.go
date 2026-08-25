@@ -83,7 +83,9 @@ func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Valu
 			continue
 		}
 
-		name, options, _ := strings.Cut(field.Tag.Get("env"), ",")
+		fieldPath := path + field.Name
+
+		name, suffix, hasOptions := strings.Cut(field.Tag.Get("env"), ",")
 		// `env:"-"` takes the field out of the config entirely, nested fields
 		// included.
 		if name == "-" {
@@ -93,7 +95,7 @@ func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Valu
 		if _, declared := field.Tag.Lookup("envDefault"); declared {
 			*errs = append(*errs, fmt.Errorf(
 				"field %s declares envDefault; a default belongs in SetDefaults, where code and tests can see it",
-				field.Name,
+				fieldPath,
 			))
 
 			continue
@@ -101,24 +103,26 @@ func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Valu
 
 		value := structValue.Field(i)
 
-		if len(name) != 0 {
-			leaf, err := bindLeaf(field, name, options, prefix, path, value)
+		switch {
+		case len(name) != 0:
+			leaf, err := bindLeaf(field, name, suffix, prefix, fieldPath, value)
 			if err != nil {
 				*errs = append(*errs, err)
 			} else {
 				*bindings = append(*bindings, leaf)
 			}
-
-			continue
-		}
-
-		switch {
+		case hasOptions:
+			// A tag of options alone reads nothing. Treating it as an untagged
+			// field would drop a field its author plainly meant to configure.
+			*errs = append(*errs, fmt.Errorf(
+				"field %s carries env options but names no variable", fieldPath,
+			))
 		case field.Type.Kind() == reflect.Struct:
-			appendBindings(bindings, errs, value, prefix+field.Tag.Get("envPrefix"), path+field.Name+".")
+			appendBindings(bindings, errs, value, prefix+field.Tag.Get("envPrefix"), fieldPath+".")
 		case nestsConfig(field.Type):
 			*errs = append(*errs, fmt.Errorf(
 				"field %s nests a config through %s; nest by value so the variables it reads are known from the type",
-				field.Name, field.Type.Kind(),
+				fieldPath, field.Type.Kind(),
 			))
 		}
 	}
@@ -128,29 +132,29 @@ func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Valu
 // parser its type calls for.
 func bindLeaf(
 	field reflect.StructField,
-	name, options, prefix, path string,
+	name, suffix, prefix, fieldPath string,
 	value reflect.Value,
 ) (binding, error) {
+	opts, err := parseOptions(suffix)
+	if err != nil {
+		return binding{}, fmt.Errorf("field %s: %w", fieldPath, err)
+	}
+
 	var (
-		notEmpty        = hasOption(options, "notEmpty")
 		secret          = isSecretType(field.Type)
 		separator       = separatorOf(field)
 		keyValSeparator = keyValSeparatorOf(field)
 	)
 
-	if err := checkOptions(options); err != nil {
-		return binding{}, fmt.Errorf("field %s: %w", path+field.Name, err)
-	}
-
 	parse, err := fieldParser(field.Type, separator, keyValSeparator)
 	if err != nil {
-		return binding{}, fmt.Errorf("field %s: %w", path+field.Name, err)
+		return binding{}, fmt.Errorf("field %s: %w", fieldPath, err)
 	}
 
 	variable := Variable{
 		Name:     prefix + name,
 		Type:     field.Type.String(),
-		Required: notEmpty || hasOption(options, "require"),
+		Required: opts.require || opts.notEmpty,
 		Secret:   secret,
 	}
 	// A secret publishes no default. Its rendering would be a mask, which reads
@@ -162,9 +166,9 @@ func bindLeaf(
 
 	return binding{
 		Variable: variable,
-		field:    path + field.Name,
+		field:    fieldPath,
 		target:   value,
-		notEmpty: notEmpty,
+		notEmpty: opts.notEmpty,
 		parse:    parse,
 	}, nil
 }
@@ -269,19 +273,32 @@ func keyValSeparatorOf(field reflect.StructField) string {
 	return defaultKeyValSeparator
 }
 
-// checkOptions rejects an option the env tag does not define. An unrecognised
-// one would otherwise be ignored, so a misspelled "require" would leave the
-// field optional and say nothing.
-func checkOptions(options string) error {
-	var errs []error
+// options are what an env tag's comma-separated suffix carries.
+type options struct {
+	require  bool
+	notEmpty bool
+}
 
-	for rest := options; len(rest) != 0; {
+// parseOptions reads that suffix. An option the tag does not define is an
+// error: an unrecognised one would otherwise be ignored, so a misspelled
+// "require" would leave the field optional and say nothing.
+func parseOptions(suffix string) (options, error) {
+	var (
+		parsed options
+		errs   []error
+	)
+
+	for rest := suffix; len(rest) != 0; {
 		var current string
 
 		current, rest, _ = strings.Cut(rest, ",")
 
 		switch current {
-		case "", "require", "notEmpty":
+		case "":
+		case "require":
+			parsed.require = true
+		case "notEmpty":
+			parsed.notEmpty = true
 		default:
 			errs = append(errs, fmt.Errorf(
 				"unknown env option %q; the tag takes require and notEmpty",
@@ -290,20 +307,5 @@ func checkOptions(options string) error {
 		}
 	}
 
-	return errors.Join(errs...)
-}
-
-// hasOption reports whether the comma-separated options of an env tag contain
-// option.
-func hasOption(options, option string) bool {
-	for rest := options; len(rest) != 0; {
-		var current string
-
-		current, rest, _ = strings.Cut(rest, ",")
-		if current == option {
-			return true
-		}
-	}
-
-	return false
+	return parsed, errors.Join(errs...)
 }

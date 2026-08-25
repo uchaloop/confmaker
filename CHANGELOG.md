@@ -84,6 +84,9 @@ its only dependencies.
 
 ### Fixed
 
+- An env tag that carried options but named no variable - `env:",require"` -
+  read as an untagged field, so a field its author meant to configure
+  disappeared. It is now refused.
 - Two fields resolving to one variable - nesting the same struct twice and
   leaving `envPrefix` off the second - were both filled from it, in silence. The
   declaration is now refused, naming both fields.

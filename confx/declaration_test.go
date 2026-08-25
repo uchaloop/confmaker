@@ -202,3 +202,74 @@ func TestTwoInstancesMayNotShareAPrefix(t *testing.T) {
 		t.Fatalf("the error does not name the shared prefix: %v", err)
 	}
 }
+
+// TestDeclarationErrorsNameTheFieldPath keeps a report usable in a config that
+// nests the same shape twice: "field MaxConns" names neither of them.
+func TestDeclarationErrorsNameTheFieldPath(t *testing.T) {
+	t.Run("envDefault", func(t *testing.T) {
+		type inner struct {
+			MaxConns int `env:"MAX_CONNS" envDefault:"2"`
+		}
+		type config struct {
+			Pool inner `envPrefix:"POOL_"`
+		}
+
+		if err := bindError[config](t); !strings.Contains(err.Error(), "field Pool.MaxConns") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("nested config", func(t *testing.T) {
+		type shard struct {
+			Host string `env:"HOST"`
+		}
+		type inner struct {
+			Shards []shard
+		}
+		type config struct {
+			Cluster inner `envPrefix:"CLUSTER_"`
+		}
+
+		if err := bindError[config](t); !strings.Contains(err.Error(), "field Cluster.Shards") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("unreadable type", func(t *testing.T) {
+		type inner struct {
+			Ratio complex128 `env:"RATIO"`
+		}
+		type config struct {
+			Nested inner `envPrefix:"NESTED_"`
+		}
+
+		if err := bindError[config](t); !strings.Contains(err.Error(), "field Nested.Ratio") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+// TestOptionsWithoutAVariableAreRefused covers a tag that carries options and no
+// name. It used to read as an untagged field, so a field its author meant to
+// configure simply disappeared.
+func TestOptionsWithoutAVariableAreRefused(t *testing.T) {
+	type config struct {
+		Host string `env:",require"`
+	}
+
+	if err := bindError[config](t); !strings.Contains(err.Error(), "names no variable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAnEmptyEnvTagIsNotConfiguration(t *testing.T) {
+	type config struct {
+		Host    string `env:"HOST"`
+		Ignored string `env:""`
+	}
+
+	// No options, no name: the same as no tag at all.
+	if got := names(described[config](t, "APP_")); len(got) != 1 || got[0] != "APP_HOST" {
+		t.Fatalf("manifest = %v, want only APP_HOST", got)
+	}
+}
