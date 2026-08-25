@@ -5,7 +5,91 @@ All notable changes to this module are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-08-25
+
+Configuration is read from the environment only. Files are gone, and with them
+the environment-named configuration groups that
+[12factor III](https://12factor.net/config) argues against. This module now
+reads and parses the environment itself, which leaves Fx and the secret type as
+its only dependencies.
+
+### Added
+
+- A config establishes its own defaults through a `SetDefaults()` method, called
+  before the environment is applied, so a library declares them in code its tests
+  and its callers can see. A variable that is not set leaves its field exactly as
+  `SetDefaults` left it.
+- `confx.Module` checks the environment against the manifest the `Provide` calls
+  register: a variable that starts with a prefix the application owns but matches
+  no field fails the start, with a suggestion of the name it likely misspells.
+  This replaces the strict file decoding that caught typos before.
+  `confx.AllowUnknown` exempts prefixes from that check, for a deployment that
+  shares one environment between several binaries.
+- `confx.WithDump` writes every variable the application reads, its type, its
+  current value, and where that value came from. Secrets are reported as set or
+  unset and never printed.
+- `confx.Manifest[T](name) ([]Variable, error)` returns that same list without
+  building an application - name, type, whether it is required, whether it holds
+  a secret, and the default `SetDefaults` establishes, rendered as text the
+  variable could carry back. A `.env.example`, a ConfigMap or a documentation
+  table is generated from the config type itself. It takes the options `Provide`
+  takes, and refuses a declaration the application would refuse rather than
+  returning an empty list.
+- Maps are read from a single variable, split with `envSeparator` (default `,`)
+  and `envKeyValSeparator` (default `:`). A duplicate key is an error, and a key
+  or value padded with whitespace is reported rather than trimmed.
+
+### Changed
+
+- `confx.ProvideNoFileDefault[T](name)` is now `confx.Provide[T](name)`, and
+  `confx.ProvideNoFile[T](name)` is now `confx.ProvideNamed[T](name)`. Both take
+  an instance name rather than a file section; the environment prefix is derived
+  from it as before.
+- `confx.WithEnvPrefix` is now `confx.WithPrefix`, and the prefix it is given is
+  checked: upper-case letters, digits and underscores, ending with an underscore.
+  `WithPrefix("")` is refused, where it used to read every `env` tag unprefixed
+  and leave that instance outside the strict check.
+- The tag option that marks a variable as mandatory is `require`, not
+  `required`, and an option the tag does not define is an error - a misspelled
+  one used to leave the field quietly optional.
+- An instance name is checked: it gives both the variable prefix and the Fx tag,
+  so it may hold only lowercase letters, digits and `_ - .`, and may not start or
+  end with a separator. A name with a space in it read nothing and answered to a
+  tag nobody asked for.
+- Field types are `string`, `bool`, every sized integer and float,
+  `time.Duration`, any `encoding.TextUnmarshaler`, pointers to those, and slices
+  and maps of them. `complex`, `uintptr` and `[]byte` are refused rather than
+  guessed at, and the parser for a field is chosen from its type when the config
+  is bound, so a field that could never be read fails on the first start.
+
+### Removed
+
+- The `confmaker` root package: `Load`, `LoadDir`, `Required`, `Registry`,
+  `MakeRegistry` and `ResolveSecret`. The module is now `confmaker/confx` and
+  `confmaker/validate`.
+- `confx.LoadModule`, `confx.LoadDir` and `confx.Source`. Configuration files,
+  the `ENVIRONMENT` variable and the `common.toml` / `dev.toml` / `stage.toml` /
+  `prod.toml` convention are no longer read.
+- The `koanf` struct tag. It stays inert where libraries still declare it.
+- The `envDefault` tag. Declaring one is an error naming `SetDefaults` as its
+  replacement, so a default cannot silently disappear during the migration.
+- Nesting a config through a pointer, a slice, a map or an array. How many
+  variables such a field reads cannot be known from its type, which is what the
+  strict check and the manifest rest on; nest by value instead.
+- Tag options this module never used: `init`, `expand`, `file` and `unset`.
+- Every dependency but Fx and the secret type: `caarlos0/env`, `koanf/v2` with
+  its TOML parser, file provider and `koanf/maps`, `go-viper/mapstructure/v2`,
+  `pelletier/go-toml/v2`, `fsnotify`, `mitchellh/copystructure`,
+  `mitchellh/reflectwalk`, and `uchaloop/utilfx`.
+
+### Fixed
+
+- An env tag that carried options but named no variable - `env:",require"` -
+  read as an untagged field, so a field its author meant to configure
+  disappeared. It is now refused.
+- Two fields resolving to one variable - nesting the same struct twice and
+  leaving `envPrefix` off the second - were both filled from it, in silence. The
+  declaration is now refused, naming both fields.
 
 ## [0.3.1] - 2026-08-06
 
@@ -60,7 +144,8 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/uchaloop/confmaker/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/uchaloop/confmaker/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/uchaloop/confmaker/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.2.0

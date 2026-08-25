@@ -2,22 +2,21 @@ package confx
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/uchaloop/secret/v2"
-	"github.com/uchaloop/utilfx"
 	"go.uber.org/fx"
 )
 
-// widgetConfig is a stand-in for a library's typed config: open fields from the
-// file, endpoint overridable from the env, and a secret that lives only in env.
+// widgetConfig is a stand-in for a library's typed config: an ordinary field, a
+// field without an env tag that keeps its zero value, and a required secret.
 type widgetConfig struct {
-	Endpoint string        `koanf:"endpoint" env:"ENDPOINT"`
-	Label    string        `koanf:"label"`
-	Limit    int32         `koanf:"limit"`
-	Token    secret.Secret `koanf:"-" env:"TOKEN,required"`
+	Endpoint string `env:"ENDPOINT"`
+	Label    string
+	Limit    int32         `env:"LIMIT"`
+	Token    secret.Secret `env:"TOKEN,require"`
 }
 
 func (c widgetConfig) Validate() error {
@@ -28,205 +27,208 @@ func (c widgetConfig) Validate() error {
 	return nil
 }
 
-const sampleTOML = `
-[widgets.alpha]
-endpoint = "file-endpoint:9000"
-label = "primary"
-limit = 20
-
-[widgets.beta]
-endpoint = "beta:9000"
-label = "secondary"
-`
-
-func writeTOML(t *testing.T) string {
+// runProvide builds a default (untagged) widgetConfig and returns it.
+func runProvide(t *testing.T, name string, opts ...Option) (widgetConfig, error) {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte(sampleTOML), 0o600); err != nil {
-		t.Fatalf("write toml: %v", err)
-	}
-
-	return path
-}
-
-// runProvide runs a single Provide against the file and returns the config.
-func runProvide(t *testing.T, path, section, name string, opts ...Option) (widgetConfig, error) {
-	t.Helper()
-
-	var (
-		got    widgetConfig
-		gotErr error
-	)
+	var got widgetConfig
 	app := fx.New(
 		fx.NopLogger,
-		LoadModule(path),
-		Provide[widgetConfig](section, name, opts...),
-		fx.Invoke(fx.Annotate(
-			func(cfg widgetConfig) { got = cfg },
-			fx.ParamTags(utilfx.NameTag(name)),
-		)),
+		Provide[widgetConfig](name, opts...),
+		fx.Invoke(func(cfg widgetConfig) { got = cfg }),
 	)
-	gotErr = app.Err()
 
-	return got, gotErr
+	return got, app.Err()
 }
 
-func TestProvideDecodesSectionAndSecret(t *testing.T) {
-	path := writeTOML(t)
+func TestProvideReadsPrefixedEnv(t *testing.T) {
+	t.Setenv("ALPHA_ENDPOINT", "alpha:9000")
+	t.Setenv("ALPHA_LIMIT", "20")
 	t.Setenv("ALPHA_TOKEN", "s3cr3t")
 
-	cfg, err := runProvide(t, path, "widgets.alpha", "alpha")
+	cfg, err := runProvide(t, "alpha")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
 
-	if cfg.Endpoint != "file-endpoint:9000" {
-		t.Errorf("endpoint = %q, want file value", cfg.Endpoint)
+	if cfg.Endpoint != "alpha:9000" {
+		t.Errorf("endpoint = %q, want alpha:9000", cfg.Endpoint)
 	}
-	if cfg.Label != "primary" || cfg.Limit != 20 {
-		t.Errorf("label/limit = %q/%d", cfg.Label, cfg.Limit)
+	if cfg.Limit != 20 {
+		t.Errorf("limit = %d, want 20", cfg.Limit)
 	}
 	if cfg.Token.Reveal() != "s3cr3t" {
-		t.Errorf("token not filled from ALPHA_TOKEN")
+		t.Error("token not filled from ALPHA_TOKEN")
 	}
 }
 
-func TestProvideDefaultIsUntaggedWithSectionPrefix(t *testing.T) {
-	path := writeTOML(t)
+func TestProvideLeavesUntaggedFieldsZero(t *testing.T) {
+	t.Setenv("ALPHA_ENDPOINT", "alpha:9000")
 	t.Setenv("ALPHA_TOKEN", "s3cr3t")
+	t.Setenv("ALPHA_LABEL", "primary")
 
-	var got widgetConfig
-	app := fx.New(
-		fx.NopLogger,
-		LoadModule(path),
-		ProvideDefault[widgetConfig]("widgets.alpha"), // untagged, prefix from "alpha"
-		fx.Invoke(func(cfg widgetConfig) { got = cfg }),
-	)
-	if app.Err() != nil {
-		t.Fatalf("app: %v", app.Err())
-	}
-
-	if got.Endpoint != "file-endpoint:9000" || got.Token.Reveal() != "s3cr3t" {
-		t.Fatalf("default provide did not fill config: endpoint=%q token set=%v",
-			got.Endpoint, got.Token.Reveal() != "")
-	}
-}
-
-func TestLoadDirMergesCommonThenEnvironment(t *testing.T) {
-	dir := t.TempDir()
-	common := `
-[widgets.alpha]
-endpoint = "common:9000"
-label = "common"
-limit = 20
-`
-	prod := `
-[widgets.alpha]
-endpoint = "prod:9000"
-`
-	if err := os.WriteFile(filepath.Join(dir, "common.toml"), []byte(common), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "prod.toml"), []byte(prod), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("ENVIRONMENT", "prd")
-	t.Setenv("ALPHA_TOKEN", "s3cr3t")
-
-	var got widgetConfig
-	app := fx.New(
-		fx.NopLogger,
-		LoadDir(dir),
-		ProvideDefault[widgetConfig]("widgets.alpha"),
-		fx.Invoke(func(cfg widgetConfig) { got = cfg }),
-	)
-	if app.Err() != nil {
-		t.Fatalf("app: %v", app.Err())
-	}
-	if got.Endpoint != "prod:9000" {
-		t.Fatalf("endpoint = %q, want prod overlay", got.Endpoint)
-	}
-	if got.Label != "common" || got.Limit != 20 {
-		t.Fatalf("common values lost: label=%q limit=%d", got.Label, got.Limit)
-	}
-}
-
-func TestLoadDirReportsResolutionErrorThroughFx(t *testing.T) {
-	t.Setenv("ENVIRONMENT", "stage")
-
-	app := fx.New(
-		fx.NopLogger,
-		LoadDir(t.TempDir()),
-		ProvideDefault[widgetConfig]("widgets.alpha"),
-		fx.Invoke(func(widgetConfig) {}),
-	)
-	if app.Err() == nil {
-		t.Fatal("expected an Fx build error when stage.toml is missing")
-	}
-}
-
-func TestProvideEnvOverridesFileEndpoint(t *testing.T) {
-	path := writeTOML(t)
-	t.Setenv("ALPHA_TOKEN", "s3cr3t")
-	t.Setenv("ALPHA_ENDPOINT", "env-endpoint:6543")
-
-	cfg, err := runProvide(t, path, "widgets.alpha", "alpha")
+	cfg, err := runProvide(t, "alpha")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
 
-	if cfg.Endpoint != "env-endpoint:6543" {
-		t.Fatalf("endpoint = %q, want env override", cfg.Endpoint)
+	if len(cfg.Label) != 0 {
+		t.Fatalf("label = %q, want zero: a field without an env tag is not filled", cfg.Label)
 	}
 }
 
 func TestProvidePerInstancePrefix(t *testing.T) {
-	path := writeTOML(t)
+	t.Setenv("ALPHA_ENDPOINT", "alpha:9000")
+	t.Setenv("ALPHA_TOKEN", "alpha-secret")
+	t.Setenv("BETA_ENDPOINT", "beta:9000")
 	t.Setenv("BETA_TOKEN", "beta-secret")
 
-	cfg, err := runProvide(t, path, "widgets.beta", "beta")
+	alpha, err := runProvide(t, "alpha")
+	if err != nil {
+		t.Fatalf("build alpha: %v", err)
+	}
+	beta, err := runProvide(t, "beta")
+	if err != nil {
+		t.Fatalf("build beta: %v", err)
+	}
+
+	if alpha.Token.Reveal() != "alpha-secret" || beta.Token.Reveal() != "beta-secret" {
+		t.Fatalf("instances read each other's variables: alpha=%q beta=%q",
+			alpha.Endpoint, beta.Endpoint)
+	}
+}
+
+func TestProvideNamedTagsInstance(t *testing.T) {
+	t.Setenv("BETA_ENDPOINT", "beta:9000")
+	t.Setenv("BETA_TOKEN", "beta-secret")
+
+	var got widgetConfig
+	app := fx.New(
+		fx.NopLogger,
+		ProvideNamed[widgetConfig]("beta"),
+		fx.Invoke(fx.Annotate(
+			func(cfg widgetConfig) { got = cfg },
+			fx.ParamTags(nameTag("beta")),
+		)),
+	)
+	if app.Err() != nil {
+		t.Fatalf("app: %v", app.Err())
+	}
+
+	if got.Endpoint != "beta:9000" {
+		t.Fatalf("tagged config not filled: %q", got.Endpoint)
+	}
+}
+
+func TestProvideNamedAndDefaultCoexist(t *testing.T) {
+	t.Setenv("MAIN_ENDPOINT", "main:9000")
+	t.Setenv("MAIN_TOKEN", "main-secret")
+	t.Setenv("REPLICA_ENDPOINT", "replica:9000")
+	t.Setenv("REPLICA_TOKEN", "replica-secret")
+
+	var (
+		main    widgetConfig
+		replica widgetConfig
+	)
+	app := fx.New(
+		fx.NopLogger,
+		Provide[widgetConfig]("main"),
+		ProvideNamed[widgetConfig]("replica"),
+		fx.Invoke(fx.Annotate(
+			func(m, r widgetConfig) { main, replica = m, r },
+			fx.ParamTags("", nameTag("replica")),
+		)),
+	)
+	if app.Err() != nil {
+		t.Fatalf("app: %v", app.Err())
+	}
+
+	if main.Endpoint != "main:9000" || replica.Endpoint != "replica:9000" {
+		t.Fatalf("instances crossed: main=%q replica=%q", main.Endpoint, replica.Endpoint)
+	}
+}
+
+func TestProvideDerivesPrefixFromDashedName(t *testing.T) {
+	t.Setenv("READ_REPLICA_ENDPOINT", "read:9000")
+	t.Setenv("READ_REPLICA_TOKEN", "s3cr3t")
+
+	cfg, err := runProvide(t, "read-replica")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
 
-	if cfg.Token.Reveal() != "beta-secret" {
-		t.Fatalf("token not filled from BETA_TOKEN")
+	if cfg.Endpoint != "read:9000" {
+		t.Fatalf("endpoint = %q, want the dashed name mapped to READ_REPLICA_", cfg.Endpoint)
+	}
+}
+
+func TestProvideWithPrefixOverridesName(t *testing.T) {
+	t.Setenv("REPORTING_ENDPOINT", "reporting:9000")
+	t.Setenv("REPORTING_TOKEN", "s3cr3t")
+
+	cfg, err := runProvide(t, "analytics", WithPrefix("REPORTING_"))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	if cfg.Endpoint != "reporting:9000" {
+		t.Fatalf("endpoint = %q, want the overridden prefix", cfg.Endpoint)
+	}
+}
+
+func TestProvideRejectsAPrefixThatIsNotOne(t *testing.T) {
+	cases := map[string]string{
+		"empty":           "",
+		"no trailing _":   "REPORTING",
+		"lower case":      "reporting_",
+		"stray character": "REPORTING-",
+	}
+
+	for name, prefix := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := runProvide(t, "alpha", WithPrefix(prefix)); err == nil {
+				t.Fatalf("prefix %q was accepted", prefix)
+			}
+		})
+	}
+}
+
+func TestProvideMissingRequiredSecret(t *testing.T) {
+	t.Setenv("ALPHA_ENDPOINT", "alpha:9000")
+	// ALPHA_TOKEN deliberately unset.
+
+	_, err := runProvide(t, "alpha")
+	if err == nil {
+		t.Fatal("expected an error when the required secret is unset")
+	}
+}
+
+func TestProvideReportsValidationFailure(t *testing.T) {
+	t.Setenv("ALPHA_TOKEN", "s3cr3t")
+	// ALPHA_ENDPOINT deliberately unset, so Validate fails.
+
+	_, err := runProvide(t, "alpha")
+	if err == nil {
+		t.Fatal("expected Validate to fail the build")
 	}
 }
 
 // ptrValidatedConfig declares Validate on a pointer receiver; build must still
 // call it (regression test for checking &cfg, not cfg).
 type ptrValidatedConfig struct {
-	Endpoint string `koanf:"endpoint"`
+	Endpoint string `env:"ENDPOINT"`
 }
 
 func (c *ptrValidatedConfig) Validate() error {
 	return errors.New("always invalid")
 }
 
-type noFileValidatedConfig struct {
-	Endpoint string `env:"ENDPOINT"`
-}
-
-func (c noFileValidatedConfig) Validate() error {
-	if c.Endpoint != "valid" {
-		return errors.New("endpoint was not populated before validation")
-	}
-
-	return nil
-}
-
 func TestProvideCallsPointerReceiverValidate(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte("[widgets.alpha]\nendpoint = \"e\"\n"), 0o600); err != nil {
-		t.Fatalf("write toml: %v", err)
-	}
+	t.Setenv("SERVICE_ENDPOINT", "e")
 
 	app := fx.New(
 		fx.NopLogger,
-		LoadModule(path),
-		ProvideDefault[ptrValidatedConfig]("widgets.alpha"),
+		Provide[ptrValidatedConfig]("service"),
 		fx.Invoke(func(ptrValidatedConfig) {}),
 	)
 	if app.Err() == nil {
@@ -234,173 +236,62 @@ func TestProvideCallsPointerReceiverValidate(t *testing.T) {
 	}
 }
 
-func TestProvideMissingRequiredSecret(t *testing.T) {
-	path := writeTOML(t)
-	// ALPHA_TOKEN deliberately unset.
+// validatedAfterEnv fails validation unless the environment was applied first.
+type validatedAfterEnv struct {
+	Endpoint string `env:"ENDPOINT"`
+}
 
-	_, err := runProvide(t, path, "widgets.alpha", "alpha")
-	if err == nil {
-		t.Fatal("expected an error when the required secret is unset")
+func (c validatedAfterEnv) Validate() error {
+	if c.Endpoint != "valid" {
+		return errors.New("endpoint was not populated before validation")
+	}
+
+	return nil
+}
+
+func TestProvideValidatesAfterEnv(t *testing.T) {
+	t.Setenv("SERVICE_ENDPOINT", "valid")
+
+	app := fx.New(
+		fx.NopLogger,
+		Provide[validatedAfterEnv]("service"),
+		fx.Invoke(func(validatedAfterEnv) {}),
+	)
+	if app.Err() != nil {
+		t.Fatalf("app: %v", app.Err())
 	}
 }
 
-func TestProvideMissingSection(t *testing.T) {
-	path := writeTOML(t)
-	t.Setenv("GAMMA_TOKEN", "x")
-
-	_, err := runProvide(t, path, "widgets.gamma", "gamma")
-	if err == nil {
-		t.Fatal("expected an error for a missing section")
+func TestProvideNestedStructPrefix(t *testing.T) {
+	type poolConfig struct {
+		MaxConns int32 `env:"MAX_CONNS"`
 	}
-}
-
-func TestProvideUnknownKeyRejected(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
-	body := "[widgets.alpha]\nendpoint = \"e\"\nlabel = \"l\"\ntypo = true\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatalf("write toml: %v", err)
-	}
-	t.Setenv("ALPHA_TOKEN", "s3cr3t")
-
-	_, err := runProvide(t, path, "widgets.alpha", "alpha")
-	if err == nil {
-		t.Fatal("expected an error for an unknown key")
-	}
-}
-
-func TestProvideRejectsSecretKeyExcludedByTag(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
-	body := "[widgets.alpha]\nendpoint = \"e\"\nlabel = \"l\"\ntoken = \"in-file\"\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatalf("write toml: %v", err)
-	}
-	t.Setenv("ALPHA_TOKEN", "s3cr3t")
-
-	// token maps to a koanf:"-" field, so strict decoding still rejects it as an
-	// unknown key before type-based secret ignoring applies.
-	_, err := runProvide(t, path, "widgets.alpha", "alpha")
-	if err == nil {
-		t.Fatal("expected an error for a key excluded with koanf:\"-\"")
-	}
-}
-
-func TestProvideIgnoresSecretFromFileThenReadsEnv(t *testing.T) {
 	type config struct {
-		Endpoint string        `koanf:"endpoint"`
-		Password secret.Secret `koanf:"password" env:"PASSWORD,required"`
+		Host string     `env:"HOST"`
+		Pool poolConfig `envPrefix:"POOL_"`
 	}
 
-	path := filepath.Join(t.TempDir(), "config.toml")
-	body := "[service]\nendpoint = \"localhost:9000\"\npassword = \"from-file\"\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatalf("write toml: %v", err)
-	}
-	t.Setenv("SERVICE_PASSWORD", "from-env")
+	t.Setenv("POSTGRES_HOST", "db:5432")
+	t.Setenv("POSTGRES_POOL_MAX_CONNS", "4")
 
 	var got config
 	app := fx.New(
 		fx.NopLogger,
-		LoadModule(path),
-		ProvideDefault[config]("service"),
+		Provide[config]("postgres"),
 		fx.Invoke(func(cfg config) { got = cfg }),
 	)
 	if app.Err() != nil {
 		t.Fatalf("app: %v", app.Err())
 	}
-	if got.Password.Reveal() != "from-env" {
-		t.Fatalf("password = %q, want env value", got.Password.Reveal())
+
+	if got.Pool.MaxConns != 4 {
+		t.Fatalf("pool.max_conns = %d, want 4 from POSTGRES_POOL_MAX_CONNS", got.Pool.MaxConns)
 	}
 }
 
-func TestProvideIgnoresMappedSecretWithoutEnvTag(t *testing.T) {
+func TestProvideSecretWithoutEnvTagRemainsZero(t *testing.T) {
 	type config struct {
-		Endpoint string        `koanf:"endpoint"`
-		Password secret.Secret `koanf:"password"`
-	}
-
-	path := filepath.Join(t.TempDir(), "config.toml")
-	body := "[service]\nendpoint = \"localhost:9000\"\npassword = \"from-file\"\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatalf("write toml: %v", err)
-	}
-
-	var got config
-	app := fx.New(
-		fx.NopLogger,
-		LoadModule(path),
-		ProvideDefault[config]("service"),
-		fx.Invoke(func(cfg config) { got = cfg }),
-	)
-	if app.Err() != nil {
-		t.Fatalf("app: %v", app.Err())
-	}
-	if !got.Password.IsZero() {
-		t.Fatal("file populated a Secret without an env tag")
-	}
-}
-
-func TestProvideNoFileDefaultReadsEnvWithoutFile(t *testing.T) {
-	// No LoadModule or file: env-tagged fields are filled from the environment.
-	t.Setenv("ALPHA_ENDPOINT", "env-only:9000")
-	t.Setenv("ALPHA_TOKEN", "s3cr3t")
-
-	var got widgetConfig
-	app := fx.New(
-		fx.NopLogger,
-		ProvideNoFileDefault[widgetConfig]("alpha"),
-		fx.Invoke(func(cfg widgetConfig) { got = cfg }),
-	)
-	if app.Err() != nil {
-		t.Fatalf("app: %v", app.Err())
-	}
-	if got.Endpoint != "env-only:9000" || got.Token.Reveal() != "s3cr3t" {
-		t.Fatalf("no-file config not filled: endpoint=%q token set=%v",
-			got.Endpoint, got.Token.Reveal() != "")
-	}
-	if got.Label != "" || got.Limit != 0 {
-		t.Fatalf("fields without env tags must remain zero-valued: label=%q limit=%d",
-			got.Label, got.Limit)
-	}
-}
-
-func TestProvideNoFileTagsInstance(t *testing.T) {
-	t.Setenv("BETA_ENDPOINT", "beta:9000")
-	t.Setenv("BETA_TOKEN", "beta-secret")
-
-	var got widgetConfig
-	app := fx.New(
-		fx.NopLogger,
-		ProvideNoFile[widgetConfig]("beta"),
-		fx.Invoke(fx.Annotate(
-			func(cfg widgetConfig) { got = cfg },
-			fx.ParamTags(utilfx.NameTag("beta")),
-		)),
-	)
-	if app.Err() != nil {
-		t.Fatalf("app: %v", app.Err())
-	}
-	if got.Endpoint != "beta:9000" {
-		t.Fatalf("tagged no-file config not filled: %q", got.Endpoint)
-	}
-}
-
-func TestProvideNoFileMissingRequiredSecret(t *testing.T) {
-	t.Setenv("ALPHA_ENDPOINT", "env-only:9000")
-	// ALPHA_TOKEN deliberately unset.
-
-	app := fx.New(
-		fx.NopLogger,
-		ProvideNoFileDefault[widgetConfig]("alpha"),
-		fx.Invoke(func(widgetConfig) {}),
-	)
-	if app.Err() == nil {
-		t.Fatal("expected an error when the required secret is unset")
-	}
-}
-
-func TestProvideNoFileSecretWithoutEnvTagRemainsZero(t *testing.T) {
-	type config struct {
-		Endpoint    string        `env:"ENDPOINT,required"`
+		Endpoint    string        `env:"ENDPOINT,require"`
 		FromEnv     secret.Secret `env:"PASSWORD"`
 		WithoutEnv  secret.Secret `json:"password" yaml:"password"`
 		WithoutTags secret.Secret
@@ -412,36 +303,136 @@ func TestProvideNoFileSecretWithoutEnvTagRemainsZero(t *testing.T) {
 	var got config
 	app := fx.New(
 		fx.NopLogger,
-		ProvideNoFileDefault[config]("ignored", WithEnvPrefix("CUSTOM_")),
+		Provide[config]("ignored", WithPrefix("CUSTOM_")),
 		fx.Invoke(func(cfg config) { got = cfg }),
 	)
 	if app.Err() != nil {
 		t.Fatalf("app: %v", app.Err())
 	}
-	if got.Endpoint != "localhost:9000" {
-		t.Fatalf("custom prefix was not applied: %q", got.Endpoint)
-	}
+
 	if got.FromEnv.Reveal() != "from-env" {
-		t.Fatal("Secret with only an env tag was not populated")
+		t.Fatal("Secret with an env tag was not populated")
 	}
 	if !got.WithoutEnv.IsZero() || !got.WithoutTags.IsZero() {
 		t.Fatal("Secret without an env tag was populated")
 	}
 }
 
-func TestProvideNoFileValidatesAfterEnv(t *testing.T) {
-	t.Setenv("SERVICE_ENDPOINT", "valid")
+// defaultedConfig establishes its own defaults, so the three branches of the
+// rule are visible: unset leaves the default, set overrides it, set-empty
+// assigns the empty value.
+type defaultedConfig struct {
+	Host    string        `env:"HOST"`
+	Timeout time.Duration `env:"TIMEOUT"`
+	Retries int           `env:"RETRIES"`
+}
 
-	var got noFileValidatedConfig
-	app := fx.New(
-		fx.NopLogger,
-		ProvideNoFileDefault[noFileValidatedConfig]("service"),
-		fx.Invoke(func(cfg noFileValidatedConfig) { got = cfg }),
-	)
-	if app.Err() != nil {
-		t.Fatalf("app: %v", app.Err())
+func (c *defaultedConfig) SetDefaults() {
+	c.Host = "localhost:5432"
+	c.Timeout = 30 * time.Second
+	c.Retries = 3
+}
+
+func TestSetDefaultsSurvivesAnUnsetVariable(t *testing.T) {
+	// Nothing is set at all.
+	var cfg defaultedConfig
+	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+		t.Fatalf("fill: %v", err)
 	}
-	if got.Endpoint != "valid" {
-		t.Fatalf("endpoint = %q, want valid", got.Endpoint)
+
+	if cfg.Host != "localhost:5432" || cfg.Timeout != 30*time.Second || cfg.Retries != 3 {
+		t.Fatalf("an unset variable overwrote its default: %+v", cfg)
+	}
+}
+
+func TestSetVariableOverridesTheDefault(t *testing.T) {
+	t.Setenv("APP_HOST", "db:5432")
+	t.Setenv("APP_RETRIES", "5")
+
+	var cfg defaultedConfig
+	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+
+	if cfg.Host != "db:5432" || cfg.Retries != 5 {
+		t.Fatalf("the environment did not override the default: %+v", cfg)
+	}
+	if cfg.Timeout != 30*time.Second {
+		t.Fatalf("an untouched field lost its default: %v", cfg.Timeout)
+	}
+}
+
+func TestEmptyVariableAssignsTheEmptyValue(t *testing.T) {
+	t.Setenv("APP_HOST", "")
+
+	var cfg defaultedConfig
+	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+
+	if len(cfg.Host) != 0 {
+		t.Fatalf("a variable set to empty kept its default: %q", cfg.Host)
+	}
+}
+
+func TestNotEmptyRejectsAnEmptyVariable(t *testing.T) {
+	type config struct {
+		Host string `env:"HOST,notEmpty"`
+	}
+
+	t.Setenv("APP_HOST", "")
+
+	var cfg config
+	err := fillEnv(&cfg, "APP_", "app")
+	if err == nil {
+		t.Fatal("an empty value passed notEmpty")
+	}
+}
+
+func TestRequiredIsAboutTheVariableNotTheValue(t *testing.T) {
+	type config struct {
+		Host string `env:"HOST,require"`
+	}
+
+	// A default does not satisfy required: the deployment still has to supply it.
+	var cfg config
+	cfg.Host = "seeded"
+
+	if err := fillEnv(&cfg, "APP_", "app"); err == nil {
+		t.Fatal("a seeded value satisfied required")
+	}
+}
+
+func TestFillReportsEveryProblemAtOnce(t *testing.T) {
+	type config struct {
+		Host    string `env:"HOST,require"`
+		Retries int    `env:"RETRIES"`
+	}
+
+	t.Setenv("APP_RETRIES", "many")
+
+	var cfg config
+	err := fillEnv(&cfg, "APP_", "app")
+	if err == nil {
+		t.Fatal("expected both problems to fail the build")
+	}
+	if !strings.Contains(err.Error(), "APP_HOST") || !strings.Contains(err.Error(), "APP_RETRIES") {
+		t.Fatalf("only one of two problems was reported: %v", err)
+	}
+}
+
+func TestParseErrorNeverEchoesASecret(t *testing.T) {
+	type config struct {
+		Count secret.Secret `env:"COUNT"`
+	}
+
+	t.Setenv("APP_COUNT", "s3cr3t")
+
+	var cfg config
+	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+		t.Fatalf("a secret decodes any text: %v", err)
+	}
+	if cfg.Count.Reveal() != "s3cr3t" {
+		t.Fatal("the secret was not decoded")
 	}
 }

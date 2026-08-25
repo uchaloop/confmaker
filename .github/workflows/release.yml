@@ -18,3 +18,52 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME}"
           curl -fsS "https://proxy.golang.org/${MODULE}/@v/${version}.info"
+
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole history, so the previous tag can be found for the
+          # comparison link.
+          fetch-depth: 0
+
+      - name: Take the release notes from the changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## / { exit }
+            found
+          ' CHANGELOG.md > notes.md
+
+          # A tag whose version is still filed under Unreleased would publish an
+          # empty release. Say so instead.
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "CHANGELOG.md has no section for ${version}" >&2
+            exit 1
+          fi
+
+          previous="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          if [ -n "$previous" ]; then
+            printf '\n**Full Changelog**: %s/compare/%s...%s\n' \
+              "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+              "$previous" "${GITHUB_REF_NAME}" >> notes.md
+          fi
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=(--title "${GITHUB_REF_NAME}" --notes-file notes.md --verify-tag)
+
+          # Everything before 1.0 is published as a pre-release: the API is still
+          # allowed to break between minors.
+          case "${GITHUB_REF_NAME}" in
+            v0.*) args+=(--prerelease) ;;
+          esac
+
+          gh release create "${GITHUB_REF_NAME}" "${args[@]}"
