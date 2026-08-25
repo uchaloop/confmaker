@@ -54,7 +54,7 @@ func WithDump(w io.Writer) ModuleOption {
 
 // Module checks the environment against the manifest the Provide calls register.
 // A variable that starts with a prefix the application owns but matches no field
-// fails the start, so a typo such as POSTGRES_HSOT is reported instead of
+// fails the start, so a typo such as STORE_HSOT is reported instead of
 // silently leaving the field at its default.
 //
 // Register it before the Provide calls it should cover; the check then runs

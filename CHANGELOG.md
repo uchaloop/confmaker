@@ -5,6 +5,22 @@ All notable changes to this module are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-08-25
+
+### Added
+
+- A logo, and runnable examples in the package documentation: wiring one
+  instance, a second instance of the same type, and generating from the
+  manifest. They are compiled by `go test`, so an example cannot drift from the
+  API it demonstrates.
+
+### Changed
+
+- The rules and the reasons behind them moved from the README into the package
+  documentation, where a Go developer reads them - in an editor and on
+  pkg.go.dev. The README is the landing page: what the library is, what it
+  catches, what it prints, what it generates.
+
 ## [0.4.0] - 2026-08-25
 
 Configuration is read from the environment only. Files are gone, and with them
@@ -144,7 +160,8 @@ its only dependencies.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/uchaloop/confmaker/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/uchaloop/confmaker/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/uchaloop/confmaker/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/uchaloop/confmaker/compare/v0.2.0...v0.3.0

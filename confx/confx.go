@@ -1,31 +1,3 @@
-// Package confx builds a library's typed config from the environment and
-// provides it into an Uber Fx container, so the library consumes a ready config
-// without reading the environment itself.
-//
-// A config is a plain struct with `env` tags. The tags are inert strings, so the
-// library depends only on the secret type (github.com/uchaloop/secret/v2), not
-// on this package:
-//
-//	type Config struct {
-//		Host     string        `env:"HOST"`
-//		Timeout  time.Duration `env:"TIMEOUT"`
-//		Password secret.Secret `env:"PASSWORD,notEmpty"`
-//	}
-//
-//	func (c *Config) SetDefaults() { c.Timeout = 30 * time.Second }
-//
-// The instance name gives the prefix, so Provide[Config]("postgres") reads
-// POSTGRES_HOST and the rest. Building one runs three optional steps: SetDefaults
-// establishes the config's own defaults, the environment overrides what it sets,
-// and Validate checks the result. A variable that is not set leaves its field as
-// SetDefaults left it; a variable that is set assigns it, an empty value
-// included.
-//
-// Module adds the check for the environment: a variable under a prefix the
-// application owns that matches no field fails the start. What a declaration
-// itself can get wrong - a default in a tag, an unknown option, two fields on one
-// variable, a type that cannot be read - is refused when the config is bound,
-// before any value is looked at.
 package confx
 
 import (
@@ -57,8 +29,8 @@ func WithPrefix(prefix string) Option {
 
 // Provide builds a T from the environment, validates it if T has a Validate
 // method, and provides it into the container untagged - the default single
-// instance. The env prefix is derived from name, so Provide[Config]("postgres")
-// reads variables such as POSTGRES_HOST.
+// instance. The env prefix is derived from name, so Provide[Config]("store")
+// reads variables such as STORE_HOST.
 //
 // Use it for the common one-instance case (paired with a no-argument library
 // module); reach for ProvideNamed only when a second instance is needed.
@@ -241,7 +213,7 @@ func checkPrefix(prefix string) error {
 
 // defaultPrefix turns an instance name into an env prefix. A variable is written
 // with underscores whatever the name uses, so "main" -> "MAIN_",
-// "read-replica" -> "READ_REPLICA_", "db.postgres" -> "DB_POSTGRES_".
+// "read-replica" -> "READ_REPLICA_", "db.main" -> "DB_MAIN_".
 func defaultPrefix(name string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(name)) + "_"
 }
