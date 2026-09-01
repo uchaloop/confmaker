@@ -273,3 +273,104 @@ func TestAnEmptyEnvTagIsNotConfiguration(t *testing.T) {
 		t.Fatalf("manifest = %v, want only APP_HOST", got)
 	}
 }
+
+// TestASecretInACollectionIsRefused covers the shape that would read a list of
+// secrets out of one variable. It splits on a separator a token cannot escape,
+// and neither the value nor the reason it would not parse is ever printed - so
+// a token holding a comma would become two unusable secrets in silence.
+func TestASecretInACollectionIsRefused(t *testing.T) {
+	t.Run("slice", func(t *testing.T) {
+		type config struct {
+			Tokens []secret.Secret `env:"TOKENS"`
+		}
+
+		if err := bindError[config](t); !strings.Contains(err.Error(), "holds a secret in a slice") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("map value", func(t *testing.T) {
+		type config struct {
+			Tokens map[string]secret.Secret `env:"TOKENS"`
+		}
+
+		if err := bindError[config](t); !strings.Contains(err.Error(), "holds a secret in a map") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("slice of pointers", func(t *testing.T) {
+		type config struct {
+			Tokens []*secret.Secret `env:"TOKENS"`
+		}
+
+		if err := bindError[config](t); !strings.Contains(err.Error(), "holds a secret") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("a single secret is still read", func(t *testing.T) {
+		type config struct {
+			Token secret.Secret `env:"TOKEN"`
+		}
+
+		if got := names(described[config](t, "CONFXAPP_")); len(got) != 1 {
+			t.Fatalf("manifest = %v", got)
+		}
+	})
+}
+
+// TestAnEnvPrefixThatExtendsNothingIsRefused covers the two shapes where the tag
+// reads as an instruction and is not one. Both used to pass in silence, and the
+// second dropped the field from the config entirely.
+func TestAnEnvPrefixThatExtendsNothingIsRefused(t *testing.T) {
+	t.Run("on a field that names a variable", func(t *testing.T) {
+		type config struct {
+			Host string `env:"HOST" envPrefix:"POOL_"`
+		}
+
+		if err := bindError[config](t); !strings.Contains(err.Error(), "names a variable and declares envPrefix") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("on a field that is not a struct", func(t *testing.T) {
+		type config struct {
+			Host string `envPrefix:"POOL_"`
+			Port int    `env:"PORT"`
+		}
+
+		if err := bindError[config](t); !strings.Contains(err.Error(), "is not a struct nested by value") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("a pointer is still reported as a pointer", func(t *testing.T) {
+		// The more specific diagnosis wins: the problem is the indirection, not
+		// the prefix that would have been fine on the struct behind it.
+		type pool struct {
+			MaxConns int `env:"MAX_CONNS"`
+		}
+		type config struct {
+			Pool *pool `envPrefix:"POOL_"`
+		}
+
+		if err := bindError[config](t); !strings.Contains(err.Error(), "nest by value") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("a struct nested by value still extends the prefix", func(t *testing.T) {
+		type pool struct {
+			MaxConns int `env:"MAX_CONNS"`
+		}
+		type config struct {
+			Pool pool `envPrefix:"POOL_"`
+		}
+
+		got := names(described[config](t, "CONFXAPP_"))
+		if len(got) != 1 || got[0] != "CONFXAPP_POOL_MAX_CONNS" {
+			t.Fatalf("manifest = %v", got)
+		}
+	})
+}

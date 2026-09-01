@@ -2,6 +2,7 @@ package confx
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -434,5 +435,51 @@ func TestParseErrorNeverEchoesASecret(t *testing.T) {
 	}
 	if cfg.Count.Reveal() != "s3cr3t" {
 		t.Fatal("the secret was not decoded")
+	}
+}
+
+// TestConfigErrorNamesEveryLine covers what the label exists for: a stage joins
+// its problems, the join renders one per line, and a line read on its own still
+// says which config it belongs to.
+func TestConfigErrorNamesEveryLine(t *testing.T) {
+	err := makeConfigError("store", errors.Join(
+		errors.New("first problem"),
+		errors.New("second problem"),
+	))
+
+	want := `config "store": first problem` + "\n" + `config "store": second problem`
+	if err.Error() != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", err.Error(), want)
+	}
+}
+
+// TestConfigErrorKeepsTheStagesOwnContext covers a join a stage wrapped in
+// context of its own. Labelling the errors behind the join would report the
+// name and drop the "pool:" that says where in the config the problem is.
+func TestConfigErrorKeepsTheStagesOwnContext(t *testing.T) {
+	err := makeConfigError("store", fmt.Errorf("pool: %w", errors.Join(
+		errors.New("max_conns must be positive"),
+		errors.New("min_conns exceeds max_conns"),
+	)))
+
+	for _, want := range []string{
+		`config "store": pool: max_conns must be positive`,
+		`config "store": min_conns exceeds max_conns`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("got:\n%s\nwant a line %q", err.Error(), want)
+		}
+	}
+}
+
+// TestConfigErrorStaysInspectable keeps errors.Is reaching through the label and
+// into the join behind it, so a caller can still recognise what a stage
+// reported.
+func TestConfigErrorStaysInspectable(t *testing.T) {
+	sentinel := errors.New("sentinel")
+
+	err := makeConfigError("store", errors.Join(errors.New("other"), sentinel))
+	if !errors.Is(err, sentinel) {
+		t.Fatal("errors.Is does not reach the error behind the label")
 	}
 }

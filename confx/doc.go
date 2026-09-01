@@ -46,6 +46,11 @@ tag is visible only to the loader, while a method is visible to the library's
 own tests and callers too. There is no envDefault tag, and declaring one is an
 error.
 
+A secret is the whole value of one variable. A collection of them is refused: it
+would split on a separator a token cannot escape, and neither the value nor the
+reason it would not parse is ever printed, so a token holding the separator would
+become two unusable secrets in silence.
+
 # Required values
 
 The option require fails the start when the variable is not set; notEmpty fails
@@ -90,6 +95,17 @@ envPrefix extends the prefix for a nested struct:
 Nest by value: how many variables a config reads has to be known from its type,
 which a pointer or a collection cannot promise.
 
+The tag is honoured on such a struct and nowhere else. On a field that names a
+variable of its own, or on a field that is not a struct at all, it extends
+nothing - and a field carrying it is not quietly skipped but refused, because
+the second shape used to drop the field from the config entirely.
+
+Unlike the prefix an instance is read under, envPrefix is not checked: it is
+written into the name as it stands, trailing underscore or not, so
+envPrefix:"POOL" and env:"_MAX_CONNS" reach the same variable as the pair that
+puts the underscore on the prefix. Where the boundary goes is the declaration's
+own business.
+
 A slice splits on envSeparator, "," by default. A map reads from one variable,
 splitting entries the same way and a key from its value on envKeyValSeparator,
 ":" by default:
@@ -110,6 +126,8 @@ first start, whether or not the environment happens to set the variable:
   - an option other than require or notEmpty, or options with no variable name:
     a misspelled one would leave the field quietly optional;
   - two fields claiming one variable: one value would fill both;
+  - envPrefix on anything but a struct nested by value: it extends nothing;
+  - a secret in a slice, an array or a map: a secret is one whole variable;
   - a config nested through a pointer, slice, map or array;
   - a field of a type that cannot be read from text;
   - an empty envSeparator: a value would split into single characters;
@@ -128,10 +146,15 @@ fails the start:
 	unknown configuration variable "STORE_HSOT" (did you mean "STORE_HOST"?)
 
 Variables outside the application's own prefixes are never examined. Register
-Module before the Provide calls it covers, so the check runs ahead of the
-constructors and reports the typo rather than the missing value it causes.
-AllowUnknown exempts a prefix, for a deployment that shares one environment
-between several binaries.
+Module before the application's own Invoke calls: Fx runs invocations in the
+order they are registered, so the check then reports the typo rather than the
+missing value it causes. AllowUnknown exempts a prefix, for a deployment that
+shares one environment between several binaries.
+
+It is also where a variable two instances both claim is reported - a collision a
+single config cannot see, arising when one instance's prefix runs into another's.
+A value two libraries genuinely share is one config, provided once and injected
+wherever it is needed.
 
 WithDump writes every variable the application reads, its type, its current
 value and where that value came from. A secret is never printed: not in the

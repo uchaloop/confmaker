@@ -76,10 +76,14 @@ declare:
 unknown configuration variable "STORE_HSOT" (did you mean "STORE_HOST"?)
 ```
 
+It has the whole application in view, so it also refuses two instances that
+would read one prefix, or one variable, and could not then be told apart.
+
 Everything a declaration itself can get wrong is refused before any value is
 read - a default written in a tag, an option the tag does not define, two fields
-claiming one variable, a config nested through a pointer or a slice, a field of a
-type that cannot be read from text.
+claiming one variable, `envPrefix` on anything but a struct nested by value, a
+secret in a slice or a map, a config nested through a pointer or a slice, a field
+of a type that cannot be read from text.
 
 Every problem is reported at once, one per line, each naming the config it
 belongs to:
@@ -91,8 +95,8 @@ config "store": timeout must be positive
 
 ## What it prints
 
-`confx.Module(confx.WithDump(os.Stdout))` writes what the application actually
-read:
+`confx.Module(confx.WithDump(os.Stdout))` writes every variable the application
+reads, the value it carries and where that value comes from:
 
 ```text
 INSTANCE  VARIABLE            TYPE           VALUE          SOURCE
@@ -122,6 +126,29 @@ Each entry carries its Go type, whether it is required, whether it holds a
 secret, and its default rendered as text the variable could carry back. It is the
 same traversal that fills the config, so a variable it lists is exactly a
 variable the config reads.
+
+## Reporting every problem
+
+A `Validate` that returns on its first problem reports one problem.
+[validate](https://github.com/uchaloop/validate) accumulates them, so a config
+answers in one pass and a deployment is fixed in one rollout:
+
+```go
+import "github.com/uchaloop/validate"
+
+func (c Config) Validate() error {
+	var errs validate.Errors
+
+	errs.Require(c.Timeout > 0, "timeout must be positive, got %s", c.Timeout)
+	errs.Require(len(c.Host) != 0, "host is required")
+
+	return errs.Err()
+}
+```
+
+It is a module of its own and depends on nothing outside the standard library,
+this one included, so a library declaring a config validates it without taking
+the loader on as a dependency.
 
 ## Documentation
 

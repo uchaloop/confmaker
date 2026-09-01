@@ -5,6 +5,67 @@ All notable changes to this module are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-01
+
+Two declarations that used to pass now fail when the config is bound: a secret in
+a slice or a map, and `envPrefix` on anything but a struct nested by value.
+
+### Fixed
+
+- A nil pointer to a type with its own text form no longer panics when its
+  default is rendered. A `*time.Time` field brought the application down on the
+  first bind, whether or not its variable was set.
+- A secret in a slice or a map is refused rather than printed: `[]secret.Secret`
+  was not recognised as a secret, so `WithDump` wrote its variable out in full.
+- A slice of a named byte-sized type is read instead of refused. The element was
+  matched by kind, so `[]Status` with `type Status uint8` looked like `[]byte`.
+- A type whose `MarshalText` takes a pointer receiver renders through it. The
+  parser was chosen from the method set of `*T` and the rendering from `T`.
+- A joined error a stage wrapped in context of its own is labelled on every line
+  rather than only the first.
+
+### Added
+
+- A variable two instances both claim fails the start, naming both - one
+  instance's prefix running into another's arrives at a single variable name.
+- `envPrefix` on anything but a struct nested by value is refused. It extended
+  nothing, and on a non-struct field it dropped the field from the config.
+
+### Removed
+
+- The `validate` package moved to `github.com/uchaloop/validate`. Importing it
+  dragged this module - the loader - into every library that declares a config.
+
+### Changed
+
+- The suggestion for an unknown variable is bounded rather than computed in full:
+  a band around the diagonal, an early exit, and rows reused between candidates.
+  Against 120 declared variables, 148 to 52 microseconds and 242 allocations to
+  4. A test checks every result against the full matrix over a quarter of a
+  million random pairs.
+- An instance name is folded into its prefix a byte at a time. `NewReplacer`
+  compiled a trie per call - an eighth of what a manifest allocated - to turn
+  "store" into "STORE_".
+- The traversals walk a struct through `reflect.Value.Fields` and
+  `reflect.Type.Fields`. The iterators cost eight allocations per instance at
+  startup; reading the traversal without index arithmetic is worth more.
+- Bindings are allocated once against the field count, and a value renders
+  through one interface conversion rather than two. Describing a twenty-variable
+  config went from 8.1 to 5.2 microseconds.
+- `parseText` asserts through `reflect.TypeAssert`, which takes a linter
+  exemption off the line. Sorting goes through `slices`, and `sort` is gone.
+- The module is built with Go 1.27. Nothing in 1.27 is used here, so this is a
+  decision about the toolchain rather than a requirement; a module that depends
+  on this one has to declare 1.27 as well.
+- Benchmarks cover the three traversals a startup runs.
+- The README lists what a declaration is refused for and the checks Module runs
+  across instances, and points at the `validate` module.
+- `WithDump` is described as writing the value a variable carries: it prints the
+  text of the variable, so a duration set to 3600s appears as 3600s.
+- `envPrefix` is documented as deliberately unchecked, unlike an instance prefix.
+- The note on registering `Module` early names what the order is about: Fx runs
+  invocations in the order they are registered.
+
 ## [0.4.2] - 2026-08-25
 
 ### Fixed
