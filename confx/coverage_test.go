@@ -248,7 +248,7 @@ func TestParseErrorNeverNamesASecretValue(t *testing.T) {
 }
 
 func TestHintStaysSilentWithoutACloseCandidate(t *testing.T) {
-	known := map[string]bool{"CONFXAPP_HOST": true}
+	known := map[string]string{"CONFXAPP_HOST": "app"}
 
 	if got := hint("CONFXAPP_SOMETHING_ENTIRELY_ELSE", known); len(got) != 0 {
 		t.Fatalf("a distant name was suggested: %q", got)

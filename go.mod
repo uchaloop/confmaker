@@ -1,10 +1,11 @@
 module github.com/uchaloop/confmaker
 
-go 1.26.1
+go 1.27
 
-require go.uber.org/fx v1.24.0
-
-require github.com/uchaloop/secret/v2 v2.0.0
+require (
+	github.com/uchaloop/secret/v2 v2.0.0
+	go.uber.org/fx v1.24.0
+)
 
 require (
 	github.com/stretchr/testify v1.9.0 // indirect

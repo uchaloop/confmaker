@@ -2,6 +2,7 @@ package confx
 
 import (
 	"bytes"
+	"math/rand"
 	"strings"
 	"testing"
 
@@ -178,7 +179,7 @@ func TestWithDumpListsVariablesAndMasksSecrets(t *testing.T) {
 func TestModuleHintIsDeterministic(t *testing.T) {
 	// Three candidates sit at the same edit distance from the typo, so an
 	// unordered scan of the known names would report a different one per run.
-	known := map[string]bool{"CONFXAPP_HOST": true, "CONFXAPP_MOST": true, "CONFXAPP_COST": true}
+	known := map[string]string{"CONFXAPP_HOST": "app", "CONFXAPP_MOST": "app", "CONFXAPP_COST": "app"}
 
 	first := hint("CONFXAPP_XOST", known)
 	for range 100 {
@@ -242,5 +243,169 @@ func TestModuleReportsAnUnreadableConfig(t *testing.T) {
 	).Err()
 	if err == nil || !strings.Contains(err.Error(), "nest by value") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestTwoInstancesMayNotClaimOneVariable covers the collision a single config
+// cannot see: two prefixes that run into each other, so a name declared under
+// one instance is the name another instance reads. One value would fill two
+// configs that nothing keeps in step.
+func TestTwoInstancesMayNotClaimOneVariable(t *testing.T) {
+	type outer struct {
+		Host string `env:"MAIN_HOST"`
+	}
+	type inner struct {
+		Host string `env:"HOST"`
+	}
+
+	err := checkEnvironment([]descriptor{
+		{label: "db", prefix: "CONFXDB_", variables: mustDescribe[outer](t, "CONFXDB_")},
+		{label: "db_main", prefix: "CONFXDB_MAIN_", variables: mustDescribe[inner](t, "CONFXDB_MAIN_")},
+	}, nil)
+
+	if err == nil {
+		t.Fatal("the shared variable was accepted")
+	}
+	if !strings.Contains(err.Error(), "CONFXDB_MAIN_HOST") {
+		t.Fatalf("the error does not name the variable: %v", err)
+	}
+	if !strings.Contains(err.Error(), `"db"`) || !strings.Contains(err.Error(), `"db_main"`) {
+		t.Fatalf("the error does not name both instances: %v", err)
+	}
+}
+
+func TestDistinctInstancesAreNotACollision(t *testing.T) {
+	type config struct {
+		Host string `env:"HOST"`
+	}
+
+	err := checkEnvironment([]descriptor{
+		{label: "primary", prefix: "CONFXPRIMARY_", variables: mustDescribe[config](t, "CONFXPRIMARY_")},
+		{label: "replica", prefix: "CONFXREPLICA_", variables: mustDescribe[config](t, "CONFXREPLICA_")},
+	}, nil)
+	if err != nil {
+		t.Fatalf("two instances of one type were refused: %v", err)
+	}
+}
+
+func mustDescribe[T any](t *testing.T, prefix string) []Variable {
+	t.Helper()
+
+	variables, err := manifestOf[T](prefix)
+	if err != nil {
+		t.Fatalf("describing %s: %v", prefix, err)
+	}
+
+	return variables
+}
+
+// fullMatrixDistance is the textbook Levenshtein, kept as the reference the
+// bounded scan is checked against. The scan fills only a band around the
+// diagonal and abandons a comparison the moment it cannot come in under budget,
+// so what it skips has to be shown to be what it was allowed to skip.
+func fullMatrixDistance(a, b string) int {
+	previous := make([]int, len(b)+1)
+	current := make([]int, len(b)+1)
+
+	for j := range previous {
+		previous[j] = j
+	}
+
+	for i := 1; i <= len(a); i++ {
+		current[0] = i
+
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+
+			current[j] = min(previous[j]+1, current[j-1]+1, previous[j-1]+cost)
+		}
+
+		previous, current = current, previous
+	}
+
+	return previous[len(b)]
+}
+
+func TestEditDistanceMatchesTheFullMatrix(t *testing.T) {
+	// Four symbols over short words, so the pairs that matter - a transposition,
+	// a repeated run, one string a prefix of the other - come up in bulk.
+	const alphabet = "AB_0"
+
+	random := rand.New(rand.NewSource(1))
+
+	word := func() string {
+		out := make([]byte, random.Intn(13))
+		for i := range out {
+			out[i] = alphabet[random.Intn(len(alphabet))]
+		}
+
+		return string(out)
+	}
+
+	var rows editRows
+
+	for range 50000 {
+		a, b := word(), word()
+
+		for limit := range 5 {
+			want := min(fullMatrixDistance(a, b), limit+1)
+
+			if got := rows.editDistance(a, b, limit); got != want {
+				t.Fatalf("editDistance(%q, %q, %d) = %d, want %d", a, b, limit, got, want)
+			}
+		}
+	}
+}
+
+// TestEditDistanceIsSymmetric covers the swap the scan makes to put the longer
+// string first: a distance that depended on the order would make a suggestion
+// depend on which name the map happened to yield.
+func TestEditDistanceIsSymmetric(t *testing.T) {
+	const alphabet = "AB_0"
+
+	random := rand.New(rand.NewSource(2))
+
+	var rows editRows
+
+	for range 20000 {
+		a := make([]byte, random.Intn(16))
+		b := make([]byte, random.Intn(16))
+
+		for i := range a {
+			a[i] = alphabet[random.Intn(len(alphabet))]
+		}
+
+		for i := range b {
+			b[i] = alphabet[random.Intn(len(alphabet))]
+		}
+
+		forward := rows.editDistance(string(a), string(b), maxHintDistance)
+		if backward := rows.editDistance(string(b), string(a), maxHintDistance); forward != backward {
+			t.Fatalf("editDistance(%q, %q) = %d but reversed = %d", a, b, forward, backward)
+		}
+	}
+}
+
+// TestEditRowsAreReusable covers the buffers a scan carries from one candidate
+// to the next: a row left over from a longer name must not be read as part of a
+// shorter one.
+func TestEditRowsAreReusable(t *testing.T) {
+	var rows editRows
+
+	for _, pair := range [][2]string{
+		{"CONFXAPP_A_VERY_LONG_VARIABLE_NAME", "CONFXAPP_A_VERY_LONG_VARIABLE_NAMF"},
+		{"CONFXAPP_HOST", "CONFXAPP_HSOT"},
+		{"A", "B"},
+		{"", ""},
+		{"CONFXAPP_HOST", "CONFXAPP_HOST"},
+	} {
+		want := min(fullMatrixDistance(pair[0], pair[1]), maxHintDistance+1)
+
+		if got := rows.editDistance(pair[0], pair[1], maxHintDistance); got != want {
+			t.Fatalf("editDistance(%q, %q) = %d, want %d", pair[0], pair[1], got, want)
+		}
 	}
 }

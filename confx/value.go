@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +20,7 @@ const defaultSeparator = ","
 const defaultKeyValSeparator = ":"
 
 var (
+	byteType            = reflect.TypeFor[byte]()
 	durationType        = reflect.TypeFor[time.Duration]()
 	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 )
@@ -106,7 +107,9 @@ func pointerParser(t reflect.Type) (parser, error) {
 // value yields an empty slice rather than a nil one: the variable was set, so
 // the field is assigned.
 func sliceParser(t reflect.Type, separator string) (parser, error) {
-	if t.Elem().Kind() == reflect.Uint8 {
+	// The exact type, not the kind: a named byte-sized type is a type of its own,
+	// and reads from text as a number or through the text form it declares.
+	if t.Elem() == byteType {
 		return nil, errors.New("a byte slice has no unambiguous text form; use a string")
 	}
 	// Splitting on nothing yields one element per character.
@@ -196,8 +199,12 @@ func mapParser(t reflect.Type, separator, keyValSeparator string) (parser, error
 }
 
 func parseText(target reflect.Value, raw string) error {
-	//nolint:forcetypeassert // declaresTextForm established the method set.
-	return target.Addr().Interface().(encoding.TextUnmarshaler).UnmarshalText([]byte(raw))
+	// declaresTextForm established the method set, so the assertion holds. It is
+	// made on the reflect.Value itself rather than on what Interface returns,
+	// which is the same method set the parser was chosen from.
+	unmarshaler, _ := reflect.TypeAssert[encoding.TextUnmarshaler](target.Addr())
+
+	return unmarshaler.UnmarshalText([]byte(raw))
 }
 
 func parseString(target reflect.Value, raw string) error {
@@ -289,30 +296,53 @@ func checkUntrimmed(part, kind string) error {
 	return nil
 }
 
+// textOf renders a value through the text form it declares, if it declares one.
+// The method set of *T is preferred, the same one UnmarshalText is looked up in,
+// so a type whose marshaller takes a pointer receiver renders the way it parses.
+// A value that cannot be addressed - a map key, a map value - is asked directly.
+func textOf(value reflect.Value) (string, bool) {
+	candidate := value
+	if value.CanAddr() {
+		candidate = value.Addr()
+	}
+
+	switch declared := candidate.Interface().(type) {
+	case encoding.TextMarshaler:
+		text, err := declared.MarshalText()
+		if err != nil {
+			return "", false
+		}
+
+		return string(text), true
+	case fmt.Stringer:
+		return declared.String(), true
+	default:
+		return "", false
+	}
+}
+
 // renderValue turns a field's current value back into the text a variable would
 // carry. A type that declares its own text form decides how it appears, and a
 // slice or map is joined with the separators its field declares, so the result
 // can be pasted back into the environment it came from.
 func renderValue(value reflect.Value, separator, keyValSeparator string) string {
-	if marshaler, ok := value.Interface().(encoding.TextMarshaler); ok {
-		text, err := marshaler.MarshalText()
-		if err != nil {
-			return ""
-		}
-
-		return string(text)
-	}
-	if stringer, ok := value.Interface().(fmt.Stringer); ok {
-		return stringer.String()
-	}
-
-	switch value.Kind() {
-	case reflect.Pointer:
+	// A pointer is resolved before its text form is looked for. MarshalText and
+	// String are usually declared on the value, and the pointer method promoted
+	// from such a declaration dereferences its receiver - so asking a nil
+	// *time.Time to render itself panics rather than yielding nothing.
+	if value.Kind() == reflect.Pointer {
 		if value.IsNil() {
 			return ""
 		}
 
 		return renderValue(value.Elem(), separator, keyValSeparator)
+	}
+
+	if text, ok := textOf(value); ok {
+		return text
+	}
+
+	switch value.Kind() {
 	case reflect.Slice:
 		parts := make([]string, value.Len())
 		for i := range parts {
@@ -339,7 +369,7 @@ func renderMap(value reflect.Value, separator, keyValSeparator string) string {
 			renderValue(iter.Value(), separator, keyValSeparator))
 	}
 
-	sort.Strings(parts)
+	slices.Sort(parts)
 
 	return strings.Join(parts, separator)
 }

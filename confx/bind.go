@@ -36,10 +36,12 @@ func bind(root reflect.Value, prefix string) ([]binding, error) {
 		return nil, fmt.Errorf("a config must be a struct, got %s", root.Type())
 	}
 
-	var (
-		bindings []binding
-		errs     []error
-	)
+	var errs []error
+
+	// Most fields of a config are configuration, so the top-level count is a
+	// close lower bound on the leaves - and a nested struct grows the slice from
+	// there rather than from nothing.
+	bindings := make([]binding, 0, root.NumField())
 
 	appendBindings(&bindings, &errs, root, prefix, "")
 
@@ -73,10 +75,7 @@ func checkCollisions(bindings []binding) []error {
 }
 
 func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Value, prefix, path string) {
-	structType := structValue.Type()
-
-	for i := range structType.NumField() {
-		field := structType.Field(i)
+	for field, value := range structValue.Fields() {
 		// An unexported field cannot be assigned, an embedded unexported type
 		// included, so it is not configuration.
 		if len(field.PkgPath) != 0 {
@@ -101,9 +100,17 @@ func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Valu
 			continue
 		}
 
-		value := structValue.Field(i)
+		_, prefixDeclared := field.Tag.Lookup("envPrefix")
 
 		switch {
+		case len(name) != 0 && prefixDeclared:
+			// envPrefix extends the prefix a nested struct is read under. On a
+			// field that names its own variable it reads nothing, so a prefix
+			// meant to apply would silently not.
+			*errs = append(*errs, fmt.Errorf(
+				"field %s names a variable and declares envPrefix; write the prefix into the variable name instead",
+				fieldPath,
+			))
 		case len(name) != 0:
 			leaf, err := bindLeaf(field, name, suffix, prefix, fieldPath, value)
 			if err != nil {
@@ -124,6 +131,14 @@ func appendBindings(bindings *[]binding, errs *[]error, structValue reflect.Valu
 				"field %s nests a config through %s; nest by value so the variables it reads are known from the type",
 				fieldPath, field.Type.Kind(),
 			))
+		case prefixDeclared:
+			// The field is not configuration at all: it names no variable and
+			// is not a struct to descend into, so the prefix extends nothing
+			// and the field is skipped entirely. Saying so beats dropping it.
+			*errs = append(*errs, fmt.Errorf(
+				"field %s declares envPrefix but is not a struct nested by value; only such a struct extends the prefix",
+				fieldPath,
+			))
 		}
 	}
 }
@@ -138,6 +153,13 @@ func bindLeaf(
 	opts, err := parseOptions(suffix)
 	if err != nil {
 		return binding{}, fmt.Errorf("field %s: %w", fieldPath, err)
+	}
+
+	if holdsSecretInCollection(field.Type) {
+		return binding{}, fmt.Errorf(
+			"field %s holds a secret in a %s; give each secret its own variable",
+			fieldPath, field.Type.Kind(),
+		)
 	}
 
 	var (
@@ -213,6 +235,25 @@ func describeParseError(b binding, err error) error {
 	return fmt.Errorf("variable %q: %w", b.Name, err)
 }
 
+// holdsSecretInCollection reports whether t is a collection of secrets. One
+// arrives as the whole value of one variable, and inside a collection it would
+// be split on a separator it has no way to escape - so a token holding a comma
+// would become two unusable secrets. Nothing would say so either: the value a
+// secret carries is never printed, and neither is the reason it would not parse.
+//
+// isSecretType unwraps a pointer, so a collection of pointers to secrets counts
+// the same way.
+func holdsSecretInCollection(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Slice, reflect.Array:
+		return isSecretType(t.Elem())
+	case reflect.Map:
+		return isSecretType(t.Key()) || isSecretType(t.Elem())
+	default:
+		return false
+	}
+}
+
 // nestsConfig reports whether t reaches a config through a pointer or a
 // collection - a shape whose variables cannot be known from the type alone,
 // because they depend on what is allocated or how many elements exist.
@@ -236,8 +277,7 @@ func declaresVariables(t reflect.Type) bool {
 		return false
 	}
 
-	for i := range t.NumField() {
-		field := t.Field(i)
+	for field := range t.Fields() {
 		if len(field.PkgPath) != 0 {
 			continue
 		}

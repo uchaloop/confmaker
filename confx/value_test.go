@@ -2,6 +2,7 @@ package confx
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -200,4 +201,98 @@ func TestParseRejectsUnsupportedKind(t *testing.T) {
 	if _, err := parseInto[struct{ A int }](t, "x"); err == nil {
 		t.Error("a bare struct was accepted as a value")
 	}
+}
+
+// pointerRendered has its text form on the value, the way time.Time does, so
+// the promoted pointer method dereferences its receiver.
+type pointerRendered struct{ n int }
+
+func (p pointerRendered) MarshalText() ([]byte, error) { return []byte(strconv.Itoa(p.n)), nil }
+
+func (p *pointerRendered) UnmarshalText(text []byte) error {
+	n, err := strconv.Atoi(string(text))
+	p.n = n
+
+	return err
+}
+
+// pointerMarshaled declares both halves of its text form on the pointer, so
+// rendering has to look in the same method set parsing does.
+type pointerMarshaled struct{ n int }
+
+func (p *pointerMarshaled) MarshalText() ([]byte, error) { return []byte(strconv.Itoa(p.n)), nil }
+
+func (p *pointerMarshaled) UnmarshalText(text []byte) error {
+	n, err := strconv.Atoi(string(text))
+	p.n = n
+
+	return err
+}
+
+func TestRenderNilPointer(t *testing.T) {
+	// A nil pointer renders as nothing rather than panicking: the text form is
+	// looked for only once the pointer is known to point at something.
+	for name, value := range map[string]any{
+		"time":            (*time.Time)(nil),
+		"declared text":   (*pointerRendered)(nil),
+		"plain":           (*int)(nil),
+		"nested pointers": (**int)(nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := renderValue(reflect.ValueOf(value), defaultSeparator, defaultKeyValSeparator)
+			if len(got) != 0 {
+				t.Fatalf("nil %T rendered as %q", value, got)
+			}
+		})
+	}
+}
+
+func TestRenderPointerReceiverText(t *testing.T) {
+	// The marshaller is declared on the pointer, the same method set the parser
+	// is chosen from, so the value renders through it and not through fmt.
+	value := pointerMarshaled{n: 7}
+
+	got := renderValue(reflect.ValueOf(&value).Elem(), defaultSeparator, defaultKeyValSeparator)
+	if got != "7" {
+		t.Fatalf("got %q, want %q", got, "7")
+	}
+}
+
+// countedByte is byte-sized but a type of its own, and reads itself from text.
+type countedByte uint8
+
+func (c *countedByte) UnmarshalText(text []byte) error {
+	*c = countedByte(len(text))
+
+	return nil
+}
+
+func TestSliceOfNamedByteType(t *testing.T) {
+	t.Run("declares its own text form", func(t *testing.T) {
+		got, err := parseInto[[]countedByte](t, "ab,cde")
+		if err != nil {
+			t.Fatalf("rejected: %v", err)
+		}
+		if len(got) != 2 || got[0] != 2 || got[1] != 3 {
+			t.Fatalf("got %v", got)
+		}
+	})
+
+	t.Run("reads as a number", func(t *testing.T) {
+		type level uint8
+
+		got, err := parseInto[[]level](t, "1,2")
+		if err != nil {
+			t.Fatalf("rejected: %v", err)
+		}
+		if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+			t.Fatalf("got %v", got)
+		}
+	})
+
+	t.Run("a byte slice is still refused", func(t *testing.T) {
+		if _, err := parseInto[[]byte](t, "ab"); err == nil {
+			t.Fatal("[]byte accepted")
+		}
+	})
 }
