@@ -57,6 +57,26 @@ jobs:
       - name: Test
         run: go test -race ./... ./confx/...
 
-  # confx on its own, with GOWORK=off, runs in release-confx.yml for now: until
-  # confx/go.mod requires a confmaker release that no longer contains confx, the
-  # two modules provide the same import path. Once it does, add that job here.
+  # confx on its own: its go.mod, the confmaker release it requires, no
+  # workspace - the adapter as users get it.
+  confx:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: confx
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: confx/go.mod
+          cache-dependency-path: confx/go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
