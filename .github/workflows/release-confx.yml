@@ -26,6 +26,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: confx/go.mod
+          cache-dependency-path: confx/go.sum
 
       - name: Vet
         run: go vet ./...

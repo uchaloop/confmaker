@@ -3,7 +3,7 @@ module github.com/uchaloop/confmaker/confx
 go 1.27
 
 require (
-	github.com/uchaloop/confmaker v0.5.0
+	github.com/uchaloop/confmaker v0.6.2
 	github.com/uchaloop/secret/v2 v2.0.0
 	github.com/uchaloop/utilfx v0.2.0
 	go.uber.org/fx v1.24.0
