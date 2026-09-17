@@ -1,11 +1,11 @@
-package confx
+package confmaker
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/uchaloop/secret/v2"
-	"go.uber.org/fx"
 )
 
 // TestBindRejectsACollision covers the mistake the rule exists for: a second
@@ -15,6 +15,7 @@ func TestBindRejectsACollision(t *testing.T) {
 	type pool struct {
 		MaxConns int `env:"MAX_CONNS"`
 	}
+
 	type config struct {
 		Primary pool `envPrefix:"PRIMARY_"`
 		Replica pool
@@ -25,6 +26,7 @@ func TestBindRejectsACollision(t *testing.T) {
 	if !strings.Contains(err.Error(), "CONFXAPP_MAX_CONNS") {
 		t.Fatalf("the error does not name the variable: %v", err)
 	}
+
 	if !strings.Contains(err.Error(), "Replica.MaxConns") || !strings.Contains(err.Error(), "Spare.MaxConns") {
 		t.Fatalf("the error does not name both declarations: %v", err)
 	}
@@ -34,12 +36,13 @@ func TestBindAllowsTheSameNameUnderDifferentPrefixes(t *testing.T) {
 	type pool struct {
 		MaxConns int `env:"MAX_CONNS"`
 	}
+
 	type config struct {
 		Primary pool `envPrefix:"PRIMARY_"`
 		Replica pool `envPrefix:"REPLICA_"`
 	}
 
-	got := names(described[config](t, "CONFXAPP_"))
+	got := names(manifested[config](t, "confxapp"))
 	if len(got) != 2 || got[0] != "CONFXAPP_PRIMARY_MAX_CONNS" || got[1] != "CONFXAPP_REPLICA_MAX_CONNS" {
 		t.Fatalf("manifest = %v", got)
 	}
@@ -52,10 +55,11 @@ func TestSecretPublishesNoDefault(t *testing.T) {
 		Password secret.Secret `env:"PASSWORD"`
 	}
 
-	variable := described[config](t, "CONFXAPP_")[0]
+	variable := manifested[config](t, "confxapp")[0]
 	if len(variable.Default) != 0 || variable.HasDefault {
 		t.Fatalf("a secret published a default: %+v", variable)
 	}
+
 	if !variable.Secret {
 		t.Fatal("the field was not reported as a secret")
 	}
@@ -65,35 +69,34 @@ func TestManifestReportsAnInvalidDeclaration(t *testing.T) {
 	type pool struct {
 		MaxConns int `env:"MAX_CONNS"`
 	}
+
 	type config struct {
 		Shards []pool
 	}
 
-	variables, err := Manifest[config]("confxapp")
+	variables, err := Manifest[config](WithName("confxapp"))
 	if err == nil {
 		t.Fatal("an invalid declaration produced a manifest instead of an error")
 	}
+
 	if len(variables) != 0 {
 		t.Fatalf("variables returned alongside the error: %v", names(variables))
 	}
 }
 
 func TestInstanceNameIsChecked(t *testing.T) {
+	t.Parallel()
+
 	rejected := []string{"", "my service", "Postgres", "_postgres", "postgres-", "pg/main"}
 
 	for _, name := range rejected {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Manifest[strictConfig](name); err == nil {
+			if _, err := Manifest[strictConfig](WithName(name)); err == nil {
 				t.Errorf("Manifest accepted %q", name)
 			}
 
-			app := fx.New(
-				fx.NopLogger,
-				Provide[strictConfig](name),
-				fx.Invoke(func(strictConfig) {}),
-			)
-			if app.Err() == nil {
-				t.Errorf("Provide accepted %q", name)
+			if _, err := Load[strictConfig](WithEnv(nil), WithName(name)); err == nil {
+				t.Errorf("Load accepted %q", name)
 			}
 		})
 	}
@@ -158,13 +161,14 @@ func TestUnreadableTypeIsRefusedWhenBound(t *testing.T) {
 // error renders one problem per line, and a line that scrolls past on its own
 // still has to say which config it belongs to.
 func TestConfigErrorLabelsEveryLine(t *testing.T) {
+	t.Parallel()
+
 	type config struct {
-		Host string `env:"HOST,require"`
-		User string `env:"USER,require"`
+		Host string `env:"HOST,required"`
+		User string `env:"USER,required"`
 	}
 
-	var cfg config
-	err := fillEnv(&cfg, "CONFXAPP_", "confxpostgres")
+	_, err := Load[config](WithName("confxpostgres"), WithPrefix("CONFXAPP_"), WithEnv(nil))
 	if err == nil {
 		t.Fatal("expected both variables to be reported")
 	}
@@ -185,19 +189,21 @@ func TestConfigErrorLabelsEveryLine(t *testing.T) {
 // instance declares, so two instances on one prefix would hide each other's
 // typos. Separators normalise, which is how two distinct names get there.
 func TestTwoInstancesMayNotShareAPrefix(t *testing.T) {
-	t.Setenv("CONFX_REPLICA_HOST", "db:5432")
-	t.Setenv("CONFX_REPLICA_PASSWORD", "s3cr3t")
+	t.Parallel()
 
-	err := fx.New(
-		fx.NopLogger,
-		Module(),
-		Provide[strictConfig]("confx-replica"),
-		ProvideNamed[strictConfig]("confx_replica"),
-		fx.Invoke(func(strictConfig) {}),
-	).Err()
+	env := map[string]string{
+		"CONFX_REPLICA_HOST":     "db:5432",
+		"CONFX_REPLICA_PASSWORD": "s3cr3t",
+	}
+
+	loader := MakeLoader(WithEnv(env))
+	loader.Add[strictConfig](WithName("confx-replica"))
+	loader.Add[strictConfig](WithName("confx_replica"))
+	err := loader.Load()
 	if err == nil {
 		t.Fatal("two instances read one prefix and the check said nothing")
 	}
+
 	if !strings.Contains(err.Error(), "CONFX_REPLICA_") {
 		t.Fatalf("the error does not name the shared prefix: %v", err)
 	}
@@ -210,6 +216,7 @@ func TestDeclarationErrorsNameTheFieldPath(t *testing.T) {
 		type inner struct {
 			MaxConns int `env:"MAX_CONNS" envDefault:"2"`
 		}
+
 		type config struct {
 			Pool inner `envPrefix:"POOL_"`
 		}
@@ -223,9 +230,11 @@ func TestDeclarationErrorsNameTheFieldPath(t *testing.T) {
 		type shard struct {
 			Host string `env:"HOST"`
 		}
+
 		type inner struct {
 			Shards []shard
 		}
+
 		type config struct {
 			Cluster inner `envPrefix:"CONFXCLUSTER_"`
 		}
@@ -239,6 +248,7 @@ func TestDeclarationErrorsNameTheFieldPath(t *testing.T) {
 		type inner struct {
 			Ratio complex128 `env:"RATIO"`
 		}
+
 		type config struct {
 			Nested inner `envPrefix:"NESTED_"`
 		}
@@ -254,7 +264,7 @@ func TestDeclarationErrorsNameTheFieldPath(t *testing.T) {
 // configure simply disappeared.
 func TestOptionsWithoutAVariableAreRefused(t *testing.T) {
 	type config struct {
-		Host string `env:",require"`
+		Host string `env:",required"`
 	}
 
 	if err := bindError[config](t); !strings.Contains(err.Error(), "names no variable") {
@@ -269,7 +279,7 @@ func TestAnEmptyEnvTagIsNotConfiguration(t *testing.T) {
 	}
 
 	// No options, no name: the same as no tag at all.
-	if got := names(described[config](t, "CONFXAPP_")); len(got) != 1 || got[0] != "CONFXAPP_HOST" {
+	if got := names(manifested[config](t, "confxapp")); len(got) != 1 || got[0] != "CONFXAPP_HOST" {
 		t.Fatalf("manifest = %v, want only APP_HOST", got)
 	}
 }
@@ -314,7 +324,7 @@ func TestASecretInACollectionIsRefused(t *testing.T) {
 			Token secret.Secret `env:"TOKEN"`
 		}
 
-		if got := names(described[config](t, "CONFXAPP_")); len(got) != 1 {
+		if got := names(manifested[config](t, "confxapp")); len(got) != 1 {
 			t.Fatalf("manifest = %v", got)
 		}
 	})
@@ -351,6 +361,7 @@ func TestAnEnvPrefixThatExtendsNothingIsRefused(t *testing.T) {
 		type pool struct {
 			MaxConns int `env:"MAX_CONNS"`
 		}
+
 		type config struct {
 			Pool *pool `envPrefix:"POOL_"`
 		}
@@ -364,13 +375,136 @@ func TestAnEnvPrefixThatExtendsNothingIsRefused(t *testing.T) {
 		type pool struct {
 			MaxConns int `env:"MAX_CONNS"`
 		}
+
 		type config struct {
 			Pool pool `envPrefix:"POOL_"`
 		}
 
-		got := names(described[config](t, "CONFXAPP_"))
+		got := names(manifested[config](t, "confxapp"))
 		if len(got) != 1 || got[0] != "CONFXAPP_POOL_MAX_CONNS" {
 			t.Fatalf("manifest = %v", got)
 		}
 	})
+}
+
+func TestUnknownEnvOptionIsRefused(t *testing.T) {
+	cases := map[string]string{
+		"misspelled required": "HOST,requred",
+		"wrong case":          "HOST,notempty",
+		"retired option":      "HOST,init",
+	}
+
+	for name, tag := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Built by hand: the tag has to be a literal for the compiler.
+			var err error
+
+			switch tag {
+			case "HOST,requred":
+				type config struct {
+					Host string `env:"HOST,requred"`
+				}
+
+				err = bindError[config](t)
+			case "HOST,notempty":
+				type config struct {
+					Host string `env:"HOST,notempty"`
+				}
+
+				err = bindError[config](t)
+			default:
+				type config struct {
+					Host string `env:"HOST,init"`
+				}
+
+				err = bindError[config](t)
+			}
+
+			if !strings.Contains(err.Error(), "unknown env option") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestSeparatorTagsApplyOnlyWhereValuesAreSplit(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		err  error
+		want string
+	}{
+		"separator on a scalar": {bindError[struct {
+			Count int `env:"COUNT" envSeparator:""`
+		}](t), "envSeparator applies to a slice or map"},
+		"key separator on a slice": {bindError[struct {
+			Names []string `env:"NAMES" envKeyValSeparator:"="`
+		}](t), "envKeyValSeparator applies to a map"},
+		"separator on a text type": {bindError[struct {
+			Price money `env:"PRICE" envSeparator:";"`
+		}](t), "envSeparator applies to a slice or map"},
+		"separator on a pointer to a slice": {bindError[struct {
+			Names *[]string `env:"NAMES" envSeparator:";"`
+		}](t), "envSeparator applies to a slice or map"},
+		"separator without a variable": {bindError[struct {
+			Names []string `envSeparator:";"`
+		}](t), "declares a separator but names no variable"},
+		"separator with JSON": {bindError[struct {
+			Names []string `env:"NAMES" envFormat:"json" envSeparator:";"`
+		}](t), "cannot be combined with envSeparator"},
+	}
+
+	for name, tc := range cases {
+		if !strings.Contains(tc.err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want %q", name, tc.err, tc.want)
+		}
+	}
+
+	type allowed struct {
+		Names  []string          `env:"NAMES" envSeparator:";"`
+		Labels map[string]string `env:"LABELS" envSeparator:";" envKeyValSeparator:"="`
+		Hidden []string          `env:"-" envSeparator:";"`
+	}
+
+	if _, err := compileSchema(reflect.TypeFor[allowed](), "CONFXAPP_"); err != nil {
+		t.Fatalf("separators where values are split were refused: %v", err)
+	}
+}
+
+func TestVariableNameMustSuitTheEnvironment(t *testing.T) {
+	t.Parallel()
+
+	for name, err := range map[string]error{
+		"equals sign": bindError[struct {
+			Value string `env:"bad=name"`
+		}](t),
+		"equals sign in envPrefix": bindError[struct {
+			Pool struct {
+				Size int `env:"SIZE"`
+			} `envPrefix:"POOL="`
+		}](t),
+	} {
+		if !strings.Contains(err.Error(), "which no environment variable can be named") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+
+	// A tag cannot hold NUL in source, so the type is built.
+	withNUL := reflect.StructOf([]reflect.StructField{{
+		Name: "Value", Type: reflect.TypeFor[string](), Tag: reflect.StructTag("env:\"bad\x00name\""),
+	}})
+	if _, err := compileSchema(withNUL, "CONFXAPP_"); err == nil || !strings.Contains(err.Error(), "which no environment variable can be named") {
+		t.Errorf("NUL: %v", err)
+	}
+}
+
+func TestRequiredOptionIsSpelledRequired(t *testing.T) {
+	t.Parallel()
+
+	err := bindError[struct {
+		Host string `env:"HOST,require"`
+	}](t)
+	if !strings.Contains(err.Error(), `unknown env option "require"; the tag takes required and notEmpty`) {
+		t.Fatalf("got %v", err)
+	}
 }

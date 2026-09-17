@@ -1,0 +1,5 @@
+github.com/uchaloop/confmaker v0.5.0 h1:TW3+dvPFjw6tmsFYq7OpgDjIUVdEuzmiyUU42tVxQdA=
+github.com/uchaloop/confmaker v0.5.0/go.mod h1:bzOHLA7yq0H30zTu2ytCv6S6BzoCuO0A3UJDTdluLKs=
+github.com/uchaloop/utilfx v0.2.0 h1:BPPVIKvs52t1Bc0Syl+kmclxOyVadw+3fLbzYa493hE=
+github.com/uchaloop/utilfx v0.2.0/go.mod h1:NGIarHYhwzAtxbDGMJEVWNmfFJFomLmuuGbPHDpyuiA=
+golang.org/x/sys v0.0.0-20220412211240-33da011f77ad/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=

@@ -1,14 +1,14 @@
-package confx
+package confmaker
 
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/uchaloop/secret/v2"
-	"go.uber.org/fx"
 )
 
 // widgetConfig is a stand-in for a library's typed config: an ordinary field, a
@@ -17,7 +17,7 @@ type widgetConfig struct {
 	Endpoint string `env:"ENDPOINT"`
 	Label    string
 	Limit    int32         `env:"LIMIT"`
-	Token    secret.Secret `env:"TOKEN,require"`
+	Token    secret.Secret `env:"TOKEN,required"`
 }
 
 func (c widgetConfig) Validate() error {
@@ -28,26 +28,26 @@ func (c widgetConfig) Validate() error {
 	return nil
 }
 
-// runProvide builds a default (untagged) widgetConfig and returns it.
-func runProvide(t *testing.T, name string, opts ...Option) (widgetConfig, error) {
-	t.Helper()
+// loadWidget loads a widgetConfig under the instance name from env.
+func loadWidget(env map[string]string, name string, opts ...ConfigOption) (widgetConfig, error) {
+	loadOpts := []LoadOption{WithName(name), WithEnv(env)}
+	for _, opt := range opts {
+		loadOpts = append(loadOpts, opt)
+	}
 
-	var got widgetConfig
-	app := fx.New(
-		fx.NopLogger,
-		Provide[widgetConfig](name, opts...),
-		fx.Invoke(func(cfg widgetConfig) { got = cfg }),
-	)
-
-	return got, app.Err()
+	return Load[widgetConfig](loadOpts...)
 }
 
-func TestProvideReadsPrefixedEnv(t *testing.T) {
-	t.Setenv("ALPHA_ENDPOINT", "alpha:9000")
-	t.Setenv("ALPHA_LIMIT", "20")
-	t.Setenv("ALPHA_TOKEN", "s3cr3t")
+func TestLoadReadsPrefixedVariables(t *testing.T) {
+	t.Parallel()
 
-	cfg, err := runProvide(t, "alpha")
+	env := map[string]string{
+		"ALPHA_ENDPOINT": "alpha:9000",
+		"ALPHA_LIMIT":    "20",
+		"ALPHA_TOKEN":    "s3cr3t",
+	}
+
+	cfg, err := loadWidget(env, "alpha")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -55,20 +55,27 @@ func TestProvideReadsPrefixedEnv(t *testing.T) {
 	if cfg.Endpoint != "alpha:9000" {
 		t.Errorf("endpoint = %q, want alpha:9000", cfg.Endpoint)
 	}
+
 	if cfg.Limit != 20 {
 		t.Errorf("limit = %d, want 20", cfg.Limit)
 	}
+
 	if cfg.Token.Reveal() != "s3cr3t" {
 		t.Error("token not filled from ALPHA_TOKEN")
 	}
 }
 
-func TestProvideLeavesUntaggedFieldsZero(t *testing.T) {
-	t.Setenv("ALPHA_ENDPOINT", "alpha:9000")
-	t.Setenv("ALPHA_TOKEN", "s3cr3t")
-	t.Setenv("ALPHA_LABEL", "primary")
+func TestLoadLeavesUntaggedFieldsZero(t *testing.T) {
+	t.Parallel()
 
-	cfg, err := runProvide(t, "alpha")
+	env := map[string]string{
+		"ALPHA_ENDPOINT": "alpha:9000",
+		"ALPHA_TOKEN":    "s3cr3t",
+		"ALPHA_LABEL":    "primary",
+	}
+
+	// ALPHA_LABEL is reported as unknown, which is the point: nothing reads it.
+	cfg, err := Load[widgetConfig](AllowUnknown("ALPHA_LABEL"), WithEnv(env), WithName("alpha"))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -78,17 +85,22 @@ func TestProvideLeavesUntaggedFieldsZero(t *testing.T) {
 	}
 }
 
-func TestProvidePerInstancePrefix(t *testing.T) {
-	t.Setenv("ALPHA_ENDPOINT", "alpha:9000")
-	t.Setenv("ALPHA_TOKEN", "alpha-secret")
-	t.Setenv("BETA_ENDPOINT", "beta:9000")
-	t.Setenv("BETA_TOKEN", "beta-secret")
+func TestInstancesReadTheirOwnPrefix(t *testing.T) {
+	t.Parallel()
 
-	alpha, err := runProvide(t, "alpha")
+	env := map[string]string{
+		"ALPHA_ENDPOINT": "alpha:9000",
+		"ALPHA_TOKEN":    "alpha-secret",
+		"BETA_ENDPOINT":  "beta:9000",
+		"BETA_TOKEN":     "beta-secret",
+	}
+
+	alpha, err := loadWidget(env, "alpha")
 	if err != nil {
 		t.Fatalf("build alpha: %v", err)
 	}
-	beta, err := runProvide(t, "beta")
+
+	beta, err := loadWidget(env, "beta")
 	if err != nil {
 		t.Fatalf("build beta: %v", err)
 	}
@@ -99,61 +111,15 @@ func TestProvidePerInstancePrefix(t *testing.T) {
 	}
 }
 
-func TestProvideNamedTagsInstance(t *testing.T) {
-	t.Setenv("BETA_ENDPOINT", "beta:9000")
-	t.Setenv("BETA_TOKEN", "beta-secret")
+func TestPrefixFromDashedName(t *testing.T) {
+	t.Parallel()
 
-	var got widgetConfig
-	app := fx.New(
-		fx.NopLogger,
-		ProvideNamed[widgetConfig]("beta"),
-		fx.Invoke(fx.Annotate(
-			func(cfg widgetConfig) { got = cfg },
-			fx.ParamTags(nameTag("beta")),
-		)),
-	)
-	if app.Err() != nil {
-		t.Fatalf("app: %v", app.Err())
+	env := map[string]string{
+		"READ_REPLICA_ENDPOINT": "read:9000",
+		"READ_REPLICA_TOKEN":    "s3cr3t",
 	}
 
-	if got.Endpoint != "beta:9000" {
-		t.Fatalf("tagged config not filled: %q", got.Endpoint)
-	}
-}
-
-func TestProvideNamedAndDefaultCoexist(t *testing.T) {
-	t.Setenv("CONFXMAIN_ENDPOINT", "main:9000")
-	t.Setenv("CONFXMAIN_TOKEN", "main-secret")
-	t.Setenv("CONFXREPLICA_ENDPOINT", "replica:9000")
-	t.Setenv("CONFXREPLICA_TOKEN", "replica-secret")
-
-	var (
-		main    widgetConfig
-		replica widgetConfig
-	)
-	app := fx.New(
-		fx.NopLogger,
-		Provide[widgetConfig]("confxmain"),
-		ProvideNamed[widgetConfig]("confxreplica"),
-		fx.Invoke(fx.Annotate(
-			func(m, r widgetConfig) { main, replica = m, r },
-			fx.ParamTags("", nameTag("confxreplica")),
-		)),
-	)
-	if app.Err() != nil {
-		t.Fatalf("app: %v", app.Err())
-	}
-
-	if main.Endpoint != "main:9000" || replica.Endpoint != "replica:9000" {
-		t.Fatalf("instances crossed: main=%q replica=%q", main.Endpoint, replica.Endpoint)
-	}
-}
-
-func TestProvideDerivesPrefixFromDashedName(t *testing.T) {
-	t.Setenv("READ_REPLICA_ENDPOINT", "read:9000")
-	t.Setenv("READ_REPLICA_TOKEN", "s3cr3t")
-
-	cfg, err := runProvide(t, "read-replica")
+	cfg, err := loadWidget(env, "read-replica")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -163,11 +129,15 @@ func TestProvideDerivesPrefixFromDashedName(t *testing.T) {
 	}
 }
 
-func TestProvideWithPrefixOverridesName(t *testing.T) {
-	t.Setenv("CONFXREPORTING_ENDPOINT", "reporting:9000")
-	t.Setenv("CONFXREPORTING_TOKEN", "s3cr3t")
+func TestWithPrefixOverridesName(t *testing.T) {
+	t.Parallel()
 
-	cfg, err := runProvide(t, "analytics", WithPrefix("CONFXREPORTING_"))
+	env := map[string]string{
+		"CONFXREPORTING_ENDPOINT": "reporting:9000",
+		"CONFXREPORTING_TOKEN":    "s3cr3t",
+	}
+
+	cfg, err := loadWidget(env, "analytics", WithPrefix("CONFXREPORTING_"))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -177,7 +147,9 @@ func TestProvideWithPrefixOverridesName(t *testing.T) {
 	}
 }
 
-func TestProvideRejectsAPrefixThatIsNotOne(t *testing.T) {
+func TestInvalidPrefixIsRefused(t *testing.T) {
+	t.Parallel()
+
 	cases := map[string]string{
 		"empty":           "",
 		"no trailing _":   "REPORTING",
@@ -187,28 +159,38 @@ func TestProvideRejectsAPrefixThatIsNotOne(t *testing.T) {
 
 	for name, prefix := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := runProvide(t, "alpha", WithPrefix(prefix)); err == nil {
+			if _, err := loadWidget(nil, "alpha", WithPrefix(prefix)); err == nil {
 				t.Fatalf("prefix %q was accepted", prefix)
 			}
 		})
 	}
 }
 
-func TestProvideMissingRequiredSecret(t *testing.T) {
-	t.Setenv("ALPHA_ENDPOINT", "alpha:9000")
+func TestRequiredSecretMustBeSet(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"ALPHA_ENDPOINT": "alpha:9000",
+	}
+
 	// ALPHA_TOKEN deliberately unset.
 
-	_, err := runProvide(t, "alpha")
+	_, err := loadWidget(env, "alpha")
 	if err == nil {
 		t.Fatal("expected an error when the required secret is unset")
 	}
 }
 
-func TestProvideReportsValidationFailure(t *testing.T) {
-	t.Setenv("ALPHA_TOKEN", "s3cr3t")
+func TestValidateFailureFailsLoad(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"ALPHA_TOKEN": "s3cr3t",
+	}
+
 	// ALPHA_ENDPOINT deliberately unset, so Validate fails.
 
-	_, err := runProvide(t, "alpha")
+	_, err := loadWidget(env, "alpha")
 	if err == nil {
 		t.Fatal("expected Validate to fail the build")
 	}
@@ -224,15 +206,14 @@ func (c *ptrValidatedConfig) Validate() error {
 	return errors.New("always invalid")
 }
 
-func TestProvideCallsPointerReceiverValidate(t *testing.T) {
-	t.Setenv("SERVICE_ENDPOINT", "e")
+func TestPointerReceiverValidateRuns(t *testing.T) {
+	t.Parallel()
 
-	app := fx.New(
-		fx.NopLogger,
-		Provide[ptrValidatedConfig]("service"),
-		fx.Invoke(func(ptrValidatedConfig) {}),
-	)
-	if app.Err() == nil {
+	env := map[string]string{
+		"SERVICE_ENDPOINT": "e",
+	}
+
+	if _, err := Load[ptrValidatedConfig](WithEnv(env), WithName("service")); err == nil {
 		t.Fatal("expected pointer-receiver Validate to run and fail the build")
 	}
 }
@@ -250,39 +231,38 @@ func (c validatedAfterEnv) Validate() error {
 	return nil
 }
 
-func TestProvideValidatesAfterEnv(t *testing.T) {
-	t.Setenv("SERVICE_ENDPOINT", "valid")
+func TestValidateRunsAfterEnvironment(t *testing.T) {
+	t.Parallel()
 
-	app := fx.New(
-		fx.NopLogger,
-		Provide[validatedAfterEnv]("service"),
-		fx.Invoke(func(validatedAfterEnv) {}),
-	)
-	if app.Err() != nil {
-		t.Fatalf("app: %v", app.Err())
+	env := map[string]string{
+		"SERVICE_ENDPOINT": "valid",
+	}
+
+	if _, err := Load[validatedAfterEnv](WithEnv(env), WithName("service")); err != nil {
+		t.Fatalf("load: %v", err)
 	}
 }
 
-func TestProvideNestedStructPrefix(t *testing.T) {
+func TestNestedStructPrefix(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"CONFXPOSTGRES_HOST":           "db:5432",
+		"CONFXPOSTGRES_POOL_MAX_CONNS": "4",
+	}
+
 	type poolConfig struct {
 		MaxConns int32 `env:"MAX_CONNS"`
 	}
+
 	type config struct {
 		Host string     `env:"HOST"`
 		Pool poolConfig `envPrefix:"POOL_"`
 	}
 
-	t.Setenv("CONFXPOSTGRES_HOST", "db:5432")
-	t.Setenv("CONFXPOSTGRES_POOL_MAX_CONNS", "4")
-
-	var got config
-	app := fx.New(
-		fx.NopLogger,
-		Provide[config]("confxpostgres"),
-		fx.Invoke(func(cfg config) { got = cfg }),
-	)
-	if app.Err() != nil {
-		t.Fatalf("app: %v", app.Err())
+	got, err := Load[config](WithEnv(env), WithName("confxpostgres"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 
 	if got.Pool.MaxConns != 4 {
@@ -290,38 +270,38 @@ func TestProvideNestedStructPrefix(t *testing.T) {
 	}
 }
 
-func TestProvideSecretWithoutEnvTagRemainsZero(t *testing.T) {
+func TestSecretWithoutEnvTagStaysZero(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"CUSTOM_ENDPOINT": "localhost:9000",
+		"CUSTOM_PASSWORD": "from-env",
+	}
+
 	type config struct {
-		Endpoint    string        `env:"ENDPOINT,require"`
+		Endpoint    string        `env:"ENDPOINT,required"`
 		FromEnv     secret.Secret `env:"PASSWORD"`
 		WithoutEnv  secret.Secret `json:"password" yaml:"password"`
 		WithoutTags secret.Secret
 	}
 
-	t.Setenv("CUSTOM_ENDPOINT", "localhost:9000")
-	t.Setenv("CUSTOM_PASSWORD", "from-env")
-
-	var got config
-	app := fx.New(
-		fx.NopLogger,
-		Provide[config]("ignored", WithPrefix("CUSTOM_")),
-		fx.Invoke(func(cfg config) { got = cfg }),
-	)
-	if app.Err() != nil {
-		t.Fatalf("app: %v", app.Err())
+	got, err := Load[config](WithEnv(env), WithName("ignored"), WithPrefix("CUSTOM_"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 
 	if got.FromEnv.Reveal() != "from-env" {
 		t.Fatal("Secret with an env tag was not populated")
 	}
+
 	if !got.WithoutEnv.IsZero() || !got.WithoutTags.IsZero() {
 		t.Fatal("Secret without an env tag was populated")
 	}
 }
 
 // defaultedConfig establishes its own defaults, so the three branches of the
-// rule are visible: unset leaves the default, set overrides it, set-empty
-// assigns the empty value.
+// rule are visible: unset leaves the default, set overrides it, and an empty
+// string field set empty becomes "".
 type defaultedConfig struct {
 	Host    string        `env:"HOST"`
 	Timeout time.Duration `env:"TIMEOUT"`
@@ -335,9 +315,11 @@ func (c *defaultedConfig) SetDefaults() {
 }
 
 func TestSetDefaultsSurvivesAnUnsetVariable(t *testing.T) {
+	t.Parallel()
+
 	// Nothing is set at all.
-	var cfg defaultedConfig
-	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err != nil {
+	cfg, err := Load[defaultedConfig](WithName("confxapp"), WithEnv(nil))
+	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
@@ -347,27 +329,36 @@ func TestSetDefaultsSurvivesAnUnsetVariable(t *testing.T) {
 }
 
 func TestSetVariableOverridesTheDefault(t *testing.T) {
-	t.Setenv("CONFXAPP_HOST", "db:5432")
-	t.Setenv("CONFXAPP_RETRIES", "5")
+	t.Parallel()
 
-	var cfg defaultedConfig
-	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err != nil {
+	env := map[string]string{
+		"CONFXAPP_HOST":    "db:5432",
+		"CONFXAPP_RETRIES": "5",
+	}
+
+	cfg, err := Load[defaultedConfig](WithName("confxapp"), WithEnv(env))
+	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
 	if cfg.Host != "db:5432" || cfg.Retries != 5 {
 		t.Fatalf("the environment did not override the default: %+v", cfg)
 	}
+
 	if cfg.Timeout != 30*time.Second {
 		t.Fatalf("an untouched field lost its default: %v", cfg.Timeout)
 	}
 }
 
 func TestEmptyVariableAssignsTheEmptyValue(t *testing.T) {
-	t.Setenv("CONFXAPP_HOST", "")
+	t.Parallel()
 
-	var cfg defaultedConfig
-	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err != nil {
+	env := map[string]string{
+		"CONFXAPP_HOST": "",
+	}
+
+	cfg, err := Load[defaultedConfig](WithName("confxapp"), WithEnv(env))
+	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
@@ -377,62 +368,79 @@ func TestEmptyVariableAssignsTheEmptyValue(t *testing.T) {
 }
 
 func TestNotEmptyRejectsAnEmptyVariable(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"CONFXAPP_HOST": "",
+	}
+
 	type config struct {
 		Host string `env:"HOST,notEmpty"`
 	}
 
-	t.Setenv("CONFXAPP_HOST", "")
-
-	var cfg config
-	err := fillEnv(&cfg, "CONFXAPP_", "confxapp")
+	_, err := Load[config](WithName("confxapp"), WithEnv(env))
 	if err == nil {
 		t.Fatal("an empty value passed notEmpty")
 	}
 }
 
 func TestRequiredIsAboutTheVariableNotTheValue(t *testing.T) {
+	t.Parallel()
+
 	type config struct {
-		Host string `env:"HOST,require"`
+		Host string `env:"HOST,required"`
+	}
+
+	fields, err := compileSchema(reflect.TypeFor[config](), "CONFXAPP_")
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// A default does not satisfy required: the deployment still has to supply it.
-	var cfg config
-	cfg.Host = "seeded"
-
-	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err == nil {
+	cfg := config{Host: "seeded"}
+	if err := applyAndValidate(&cfg, fields, "confxapp", nil); err == nil {
 		t.Fatal("a seeded value satisfied required")
 	}
 }
 
-func TestFillReportsEveryProblemAtOnce(t *testing.T) {
+func TestLoadReportsEveryFieldProblemAtOnce(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"CONFXAPP_RETRIES": "many",
+	}
+
 	type config struct {
-		Host    string `env:"HOST,require"`
+		Host    string `env:"HOST,required"`
 		Retries int    `env:"RETRIES"`
 	}
 
-	t.Setenv("CONFXAPP_RETRIES", "many")
-
-	var cfg config
-	err := fillEnv(&cfg, "CONFXAPP_", "confxapp")
+	_, err := Load[config](WithName("confxapp"), WithEnv(env))
 	if err == nil {
 		t.Fatal("expected both problems to fail the build")
 	}
+
 	if !strings.Contains(err.Error(), "CONFXAPP_HOST") || !strings.Contains(err.Error(), "CONFXAPP_RETRIES") {
 		t.Fatalf("only one of two problems was reported: %v", err)
 	}
 }
 
-func TestParseErrorNeverEchoesASecret(t *testing.T) {
+func TestSecretReadsAnyText(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"CONFXAPP_COUNT": "s3cr3t",
+	}
+
 	type config struct {
 		Count secret.Secret `env:"COUNT"`
 	}
 
-	t.Setenv("CONFXAPP_COUNT", "s3cr3t")
-
-	var cfg config
-	if err := fillEnv(&cfg, "CONFXAPP_", "confxapp"); err != nil {
+	cfg, err := Load[config](WithName("confxapp"), WithEnv(env))
+	if err != nil {
 		t.Fatalf("a secret decodes any text: %v", err)
 	}
+
 	if cfg.Count.Reveal() != "s3cr3t" {
 		t.Fatal("the secret was not decoded")
 	}

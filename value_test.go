@@ -1,4 +1,4 @@
-package confx
+package confmaker
 
 import (
 	"reflect"
@@ -43,6 +43,7 @@ func TestParseScalars(t *testing.T) {
 				t.Errorf("%q rejected: %v", raw, err)
 			}
 		}
+
 		if _, err := parseInto[bool](t, "yes"); err == nil {
 			t.Error(`"yes" accepted as a boolean`)
 		}
@@ -68,6 +69,7 @@ func TestParseScalars(t *testing.T) {
 		if err != nil || got != 30*time.Second {
 			t.Fatalf("got %v, err %v", got, err)
 		}
+
 		if _, err := parseInto[time.Duration](t, "30"); err == nil {
 			t.Error(`"30" accepted as a duration`)
 		}
@@ -102,6 +104,7 @@ func TestParseUsesTextUnmarshaler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
+
 	if got.Reveal() != "s3cr3t" {
 		t.Fatal("the secret was not decoded through its own text form")
 	}
@@ -141,6 +144,7 @@ func TestParseRejectsByteSlice(t *testing.T) {
 	if err == nil {
 		t.Fatal("a byte slice was accepted; its text form is ambiguous")
 	}
+
 	if !strings.Contains(err.Error(), "string") {
 		t.Fatalf("the error does not point at the alternative: %v", err)
 	}
@@ -151,6 +155,7 @@ func TestParseMaps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
+
 	if got["env"] != "prod" || got["team"] != "core" {
 		t.Fatalf("got %v", got)
 	}
@@ -184,6 +189,7 @@ func TestParseMapRejections(t *testing.T) {
 			} else {
 				_, err = parseInto[map[string]string](t, raw)
 			}
+
 			if err == nil {
 				t.Fatalf("%q was accepted", raw)
 			}
@@ -195,9 +201,11 @@ func TestParseRejectsUnsupportedKind(t *testing.T) {
 	if _, err := parseInto[complex128](t, "1+2i"); err == nil {
 		t.Error("a complex number was accepted")
 	}
+
 	if _, err := parseInto[uintptr](t, "1"); err == nil {
 		t.Error("a uintptr was accepted")
 	}
+
 	if _, err := parseInto[struct{ A int }](t, "x"); err == nil {
 		t.Error("a bare struct was accepted as a value")
 	}
@@ -239,8 +247,8 @@ func TestRenderNilPointer(t *testing.T) {
 		"nested pointers": (**int)(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := renderValue(reflect.ValueOf(value), defaultSeparator, defaultKeyValSeparator)
-			if len(got) != 0 {
+			got, err := renderValue(reflect.ValueOf(value), defaultSeparator, defaultKeyValSeparator)
+			if err != nil || len(got) != 0 {
 				t.Fatalf("nil %T rendered as %q", value, got)
 			}
 		})
@@ -252,8 +260,8 @@ func TestRenderPointerReceiverText(t *testing.T) {
 	// is chosen from, so the value renders through it and not through fmt.
 	value := pointerMarshaled{n: 7}
 
-	got := renderValue(reflect.ValueOf(&value).Elem(), defaultSeparator, defaultKeyValSeparator)
-	if got != "7" {
+	got, err := renderValue(reflect.ValueOf(&value).Elem(), defaultSeparator, defaultKeyValSeparator)
+	if err != nil || got != "7" {
 		t.Fatalf("got %q, want %q", got, "7")
 	}
 }
@@ -273,6 +281,7 @@ func TestSliceOfNamedByteType(t *testing.T) {
 		if err != nil {
 			t.Fatalf("rejected: %v", err)
 		}
+
 		if len(got) != 2 || got[0] != 2 || got[1] != 3 {
 			t.Fatalf("got %v", got)
 		}
@@ -285,6 +294,7 @@ func TestSliceOfNamedByteType(t *testing.T) {
 		if err != nil {
 			t.Fatalf("rejected: %v", err)
 		}
+
 		if len(got) != 2 || got[0] != 1 || got[1] != 2 {
 			t.Fatalf("got %v", got)
 		}
@@ -295,4 +305,89 @@ func TestSliceOfNamedByteType(t *testing.T) {
 			t.Fatal("[]byte accepted")
 		}
 	})
+}
+
+// TestCustomSeparators exercises the tags eleven fields across these repositories
+// already carry, which the defaults never reach.
+func TestCustomSeparators(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"CONFXAPP_BROKERS": "a:9092;b:9092",
+		"CONFXAPP_TIERS":   "basic=1|pro=9",
+		"CONFXAPP_PLAIN":   "k:v",
+	}
+
+	type config struct {
+		Brokers []string          `env:"BROKERS" envSeparator:";"`
+		Tiers   map[string]int    `env:"TIERS" envSeparator:"|" envKeyValSeparator:"="`
+		Plain   map[string]string `env:"PLAIN"`
+	}
+
+	cfg, err := Load[config](WithName("confxapp"), WithEnv(env))
+	if err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+
+	if len(cfg.Brokers) != 2 || cfg.Brokers[0] != "a:9092" {
+		t.Fatalf("a custom separator was not used: %v", cfg.Brokers)
+	}
+
+	if cfg.Tiers["pro"] != 9 || len(cfg.Tiers) != 2 {
+		t.Fatalf("custom map separators were not used: %v", cfg.Tiers)
+	}
+
+	if cfg.Plain["k"] != "v" {
+		t.Fatalf("the defaults stopped working alongside overrides: %v", cfg.Plain)
+	}
+}
+
+func TestEmptySeparatorIsRefused(t *testing.T) {
+	t.Run("slice", func(t *testing.T) {
+		type config struct {
+			Hosts []string `env:"HOSTS" envSeparator:""`
+		}
+
+		// Splitting on nothing would turn "abc" into three elements.
+		if err := bindError[config](t); !strings.Contains(err.Error(), "envSeparator") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("map key separator", func(t *testing.T) {
+		type config struct {
+			Tiers map[string]string `env:"TIERS" envKeyValSeparator:""`
+		}
+
+		if err := bindError[config](t); !strings.Contains(err.Error(), "envKeyValSeparator") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestParseUnsignedIntegers(t *testing.T) {
+	got, err := parseInto[uint16](t, "65535")
+	if err != nil || got != 65535 {
+		t.Fatalf("got %d, err %v", got, err)
+	}
+
+	if _, err := parseInto[uint8](t, "256"); err == nil {
+		t.Error("an out-of-range uint8 was accepted")
+	}
+}
+
+func TestPointerToAnUnreadableTypeIsRefused(t *testing.T) {
+	type config struct {
+		Ratio *complex128 `env:"RATIO"`
+	}
+
+	if err := bindError[config](t); !strings.Contains(err.Error(), "cannot be read") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseRejectsABadFloat(t *testing.T) {
+	if _, err := parseInto[float32](t, "2.5.1"); err == nil {
+		t.Error("a malformed float was accepted")
+	}
 }

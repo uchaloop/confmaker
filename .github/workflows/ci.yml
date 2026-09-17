@@ -10,8 +10,11 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  # The core module on its own: go.work must not be what makes it build.
+  core:
     runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +25,7 @@ jobs:
 
       - name: Check formatting
         run: |
+          # Both modules: gofmt walks the whole tree.
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
             echo "These files are not gofmt-ed:"
@@ -34,3 +38,25 @@ jobs:
 
       - name: Test
         run: go test -race ./...
+
+  # Both modules through go.work: the adapter against the core in this commit.
+  # ./... from the root stops at confx/go.mod, so confx is named explicitly.
+  workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+
+      - name: Vet
+        run: go vet ./... ./confx/...
+
+      - name: Test
+        run: go test -race ./... ./confx/...
+
+  # confx on its own, with GOWORK=off, runs in release-confx.yml for now: until
+  # confx/go.mod requires a confmaker release that no longer contains confx, the
+  # two modules provide the same import path. Once it does, add that job here.

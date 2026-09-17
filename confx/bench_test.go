@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uchaloop/confmaker"
 	"github.com/uchaloop/secret/v2"
+	"go.uber.org/fx"
 )
 
-// benchPool and benchConfig are the shape of a real infrastructure config: a
-// required host, a secret, a slice, a map, and a nested struct under its own
-// prefix. Twenty variables is what one instance of one library declares, and a
-// service builds a handful of instances at startup.
+// benchPool and benchConfig repeat confmaker's benchmark config, so the two
+// benchmarks compare the same work with and without Fx.
 type benchPool struct {
 	MaxConns        int32         `env:"MAX_CONNS"`
 	MinConns        int32         `env:"MIN_CONNS"`
@@ -38,47 +38,34 @@ func (c *benchConfig) SetDefaults() {
 	c.Pool.MaxConnLifetime = time.Hour
 }
 
-// BenchmarkManifest is the traversal a Provide call runs to describe one
-// instance, and the one Manifest runs to generate from a type.
-func BenchmarkManifest(b *testing.B) {
-	b.ReportAllocs()
+// BenchmarkModuleStart builds an Fx application with six populated instances:
+// the same configs and environment as confmaker's BenchmarkLoader, so the
+// difference from its "register+load" is what Fx adds. Options are built once,
+// outside the measured loop, as an application builds them once.
+func BenchmarkModuleStart(b *testing.B) {
+	env := map[string]string{}
+	options := []fx.Option{fx.NopLogger}
+	for i := range 6 {
+		name := fmt.Sprintf("confxbench%d", i)
+		for variable, value := range map[string]string{
+			"HOST": "localhost", "DATABASE": "test",
+			"USER": "app", "PASSWORD": "benchmark-secret", "APP_NAME": "worker",
+			"BROKERS": "a:9092,b:9092,c:9092", "LABELS": "env:test,team:core",
+			"POOL_MAX_CONNS": "20", "POOL_MIN_CONNS": "2", "POOL_MIN_IDLE_CONNS": "1",
+			"POOL_MAX_CONN_LIFETIME": "1h", "POOL_MAX_CONN_IDLE_TIME": "5m", "POOL_HEALTH_PERIOD": "30s",
+		} {
+			env[fmt.Sprintf("CONFXBENCH%d_%s", i, variable)] = value
+		}
 
+		options = append(options, ProvideNamed[benchConfig](name))
+	}
+
+	options = append(options, Module(confmaker.WithEnv(env)))
+
+	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Manifest[benchConfig]("confxbench"); err != nil {
+		if err := fx.New(options...).Err(); err != nil {
 			b.Fatal(err)
-		}
-	}
-}
-
-// BenchmarkFillEnv is the traversal a Provide call runs to build one instance:
-// the defaults, the environment over them, and the validation.
-func BenchmarkFillEnv(b *testing.B) {
-	b.ReportAllocs()
-
-	for b.Loop() {
-		var cfg benchConfig
-
-		_ = fillEnv(&cfg, "CONFXBENCH_", "confxbench")
-	}
-}
-
-// BenchmarkHint is the suggestion one unknown variable costs, against the
-// variables a service of six instances declares. It runs on the failing path
-// only, which is why the scan is bounded rather than fast.
-func BenchmarkHint(b *testing.B) {
-	known := make(map[string]string, 120)
-
-	for instance := range 6 {
-		for variable := range 20 {
-			known[fmt.Sprintf("CONFXINST%d_VARIABLE_NUMBER_%d", instance, variable)] = "inst"
-		}
-	}
-
-	b.ReportAllocs()
-
-	for b.Loop() {
-		if got := hint("CONFXINST3_VARIABLE_NUMBRE_7", known); len(got) == 0 {
-			b.Fatal("no suggestion for a one-edit typo")
 		}
 	}
 }

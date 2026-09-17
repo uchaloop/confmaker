@@ -1,3 +1,4 @@
+<!--suppress HtmlDeprecatedAttribute -->
 <p align="center">
   <img src="logo.png" alt="confmaker" width="320">
 </p>
@@ -8,23 +9,29 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/uchaloop/confmaker" alt="License: MIT"></a>
 </p>
 
-Typed configuration for Go services, read from the environment and nowhere else
-([12factor III](https://12factor.net/config)). Each library, each package and the
-application itself declares the config it needs as a plain struct; confmaker
-fills it, validates it, and hands it to Uber Fx.
+Typed configuration for Go, read from the environment and nowhere else
+([12factor III](https://12factor.net/config)). A library declares its config as a
+plain struct with env tags; the application loads it, and confmaker fills it,
+checks the environment for typos and validates the result.
 
-- **Defaults in code**, where the library's tests and callers see the same values
-  a deployment starts from - not in a tag only the loader can read.
-- **A misspelled variable fails the start**, with a suggestion, instead of
-  quietly leaving a field at its default.
-- **What a declaration gets wrong is refused when it is bound** - on the first
-  start, whether or not the environment happens to set that variable.
-- **A manifest of every variable** the application reads, so a `.env.example` or
-  a config map is generated from the types themselves.
-- **Two dependencies**: Fx and a secret type.
+- **Defaults in code**, in `SetDefaults`, where tests and callers see them.
+- **One report**: every problem of every config in one error, with suggestions
+  for misspelled variables.
+- **A manifest** of every variable, for a `.env.example` or a config map.
+- **No framework required**; an [Fx adapter](confx) is a separate module.
+
+## Installation
+
+Requires Go 1.27 or later.
 
 ```bash
 go get github.com/uchaloop/confmaker
+```
+
+Fx applications also add the adapter, described in [confx/README.md](confx/README.md):
+
+```bash
+go get github.com/uchaloop/confmaker/confx
 ```
 
 ## Quick start
@@ -32,11 +39,16 @@ go get github.com/uchaloop/confmaker
 A library declares what it needs and reads nothing:
 
 ```go
+package store
+
 type Config struct {
 	Host     string        `env:"HOST,notEmpty"`
 	Timeout  time.Duration `env:"TIMEOUT"`
 	Password secret.Secret `env:"PASSWORD"`
 }
+
+// ConfigName gives the instance name, and with it the prefix STORE_.
+func (Config) ConfigName() string { return "store" }
 
 func (c *Config) SetDefaults() { c.Timeout = 30 * time.Second }
 
@@ -44,77 +56,135 @@ func (c Config) Validate() error {
 	if c.Timeout <= 0 {
 		return fmt.Errorf("timeout must be positive, got %s", c.Timeout)
 	}
-
 	return nil
 }
 ```
 
-The application names the instance, which gives the environment prefix:
+The application loads it from the environment:
 
-```go
-fx.New(
-	confx.Module(),
-
-	confx.Provide[store.Config]("store"),       // STORE_HOST, STORE_TIMEOUT, ...
-	confx.ProvideNamed[store.Config]("replica"),// REPLICA_HOST, REPLICA_TIMEOUT, ...
-	confx.Provide[app.Config]("app"),           // APP_SHUTDOWN_WAIT, ...
-
-	store.Module,
-)
+```bash
+export STORE_HOST=db:5432
+export STORE_PASSWORD=s3cr3t
 ```
 
-`Provide` gives the container an untagged value, the single default instance;
-`ProvideNamed` gives it a value tagged `name:"replica"`, so a repository can ask
-for either. Nothing else in the process reads the environment.
+```go
+cfg, err := confmaker.Load[store.Config]()
+if err != nil {
+	log.Fatal(err)
+}
+```
 
-## What it catches
+`cfg.Host` is `db:5432`, `cfg.Timeout` keeps its default of `30s`, and
+`cfg.Password` holds the secret without ever printing it.
 
-`confx.Module()` compares the environment against what the `Provide` calls
-declare:
+## Multiple configurations
+
+An application with several configs registers them on one `Loader` and loads
+them together, so one error reports the problems of all of them. The same type
+can be loaded twice under different names:
+
+```go
+loader := confmaker.MakeLoader()
+primary := loader.Add[store.Config]()                              // STORE_*
+replica := loader.Add[store.Config](confmaker.WithName("replica")) // REPLICA_*
+cache := loader.Add[cache.Config]()                                // CACHE_*
+
+if err := loader.Load(); err != nil {
+	log.Fatal(err)
+}
+
+primaryCfg, _ := primary.Value()
+replicaCfg, _ := replica.Value()
+cacheCfg, _ := cache.Value()
+```
+
+`WithName` sets the instance name and prefix; `WithPrefix` changes only the
+prefix.
+
+## How loading works
+
+```mermaid
+flowchart TD
+    A["Add: name, prefix, schema"] --> B["Load: check registrations for conflicts"]
+    B -->|conflict| E["One error with every problem"]
+    B -->|no conflict| C["One snapshot of the environment"]
+    C --> D["SetDefaults"]
+    D --> F["Dump, when enabled"]
+    F --> G["Check for unknown variables"]
+    G --> H["Apply the environment to each config"]
+    H --> I["Validate each config that parsed"]
+    I --> J{"Any problem?"}
+    J -->|yes| E
+    J -->|no| K["Value returns the configs"]
+```
+
+- An invalid registration, such as a bad tag, is reported, and the other
+  configs are still checked.
+- A dump that fails is reported too; it does not stop the other checks.
+- After an error no config is handed out. Calling `Load` again returns the same
+  result without reading the environment again.
+
+A report reads like this:
 
 ```text
 unknown configuration variable "STORE_HSOT" (did you mean "STORE_HOST"?)
-```
-
-It has the whole application in view, so it also refuses two instances that
-would read one prefix, or one variable, and could not then be told apart.
-
-Everything a declaration itself can get wrong is refused before any value is
-read - a default written in a tag, an option the tag does not define, two fields
-claiming one variable, `envPrefix` on anything but a struct nested by value, a
-secret in a slice or a map, a config nested through a pointer or a slice, a field
-of a type that cannot be read from text.
-
-Every problem is reported at once, one per line, each naming the config it
-belongs to:
-
-```text
 config "store": required variable "STORE_HOST" is not set
-config "store": timeout must be positive
+config "cache": variable "CACHE_TTL": "soon" is not a duration such as "30s" or "5m"
 ```
 
-## What it prints
+## Configuration rules
 
-`confx.Module(confx.WithDump(os.Stdout))` writes every variable the application
-reads, the value it carries and where that value comes from:
+| Tag | Meaning |
+|---|---|
+| `env:"NAME"` | the field reads `<PREFIX>NAME` |
+| `env:"NAME,required"` | the variable must be set; `NAME=` is allowed |
+| `env:"NAME,notEmpty"` | the variable must be set to non-empty text (JSON `[]` is non-empty text) |
+| `env:"-"` | the field and anything nested in it are not configuration |
+| `envPrefix:"POOL_"` | on a struct field without `env`: extends the prefix for its fields |
+| `envSeparator:";"` | splits slice elements and map entries (default `,`) |
+| `envKeyValSeparator:"="` | splits a map key from its value (default `:`) |
+| `envFormat:"json"` | reads the field as JSON |
 
-```text
-INSTANCE  VARIABLE            TYPE           VALUE          SOURCE
-store     STORE_HOST          string         store:9000     env
-store     STORE_PASSWORD      secret.Secret  (set)          env
-store     STORE_TIMEOUT       time.Duration  30s            default
-```
+Supported types, how empty values are read, what is refused at registration and
+the other details are in the
+[package documentation](https://pkg.go.dev/github.com/uchaloop/confmaker).
 
-A secret is never printed: not here, not in the manifest, not in the error for a
-value that would not parse.
+## JSON values
 
-## What it generates
-
-`confx.Manifest` resolves the same list without building an application:
+A field tagged `envFormat:"json"` reads a struct, slice or map from one variable:
 
 ```go
-variables, err := confx.Manifest[store.Config]("store")
+type Config struct {
+	Endpoints []Endpoint `env:"ENDPOINTS" envFormat:"json"`
+}
+
+type Endpoint struct {
+	URL     string        `json:"url"`
+	Timeout time.Duration `json:"timeout"`
+}
 ```
+
+```text
+STORE_ENDPOINTS=[{"url":"http://a:9000","timeout":"30s"}]
+```
+
+A set variable **replaces the whole field**; nothing is merged with the default.
+If the default had a timeout and the variable writes only `{"url":"http://a"}`,
+the timeout is zero - check such values in `Validate`. Unknown members are
+errors unless a JSON tag option such as `case:ignore` or an `embed` map says
+otherwise, and durations are strings such as `"30s"`.
+
+## Manifest and dump
+
+`Manifest` lists the variables a config reads, with their defaults. It does not
+read the environment, but it calls `SetDefaults` and renders each default:
+
+```go
+variables, err := confmaker.Manifest[store.Config]()
+```
+
+Printing each `Name=Default` gives this list of variables and their values (not
+an escaped shell script: quote values yourself for shell or YAML):
 
 ```text
 STORE_HOST=
@@ -122,38 +192,52 @@ STORE_TIMEOUT=30s
 STORE_PASSWORD=
 ```
 
-Each entry carries its Go type, whether it is required, whether it holds a
-secret, and its default rendered as text the variable could carry back. It is the
-same traversal that fills the config, so a variable it lists is exactly a
-variable the config reads.
-
-## Reporting every problem
-
-A `Validate` that returns on its first problem reports one problem.
-[validate](https://github.com/uchaloop/validate) accumulates them, so a config
-answers in one pass and a deployment is fixed in one rollout:
+`WithDump` prints, while loading, each variable with its ENV value or default
+and where it came from:
 
 ```go
-import "github.com/uchaloop/validate"
+loader := confmaker.MakeLoader(confmaker.WithDump(os.Stdout))
+```
 
-func (c Config) Validate() error {
-	var errs validate.Errors
+```text
+INSTANCE  VARIABLE        TYPE           VALUE    SOURCE
+store     STORE_HOST      string         db:5432  env
+store     STORE_PASSWORD  secret.Secret  (set)    env
+store     STORE_TIMEOUT   time.Duration  30s      default
+```
 
-	errs.Require(c.Timeout > 0, "timeout must be positive, got %s", c.Timeout)
-	errs.Require(len(c.Host) != 0, "host is required")
+Fields of a secret type are never printed. A password written into a plain
+string, such as a URL, is not recognised as a secret: keep it in its own
+`secret.Secret` field.
 
-	return errs.Err()
+## Testing
+
+`WithEnv` loads from a map instead of the process environment, so a test needs no
+`t.Setenv` and can run in parallel:
+
+```go
+func TestStore(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := confmaker.Load[store.Config](confmaker.WithEnv(map[string]string{
+		"STORE_HOST": "localhost",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ...
 }
 ```
 
-It is a module of its own and depends on nothing outside the standard library,
-this one included, so a library declaring a config validates it without taking
-the loader on as a dependency.
+`Validate` may return several problems at once; the optional
+[validate](https://github.com/uchaloop/validate) module is one way to collect
+them.
 
 ## Documentation
 
-The tags, the rules and the reasons behind them are in the package documentation:
-**[pkg.go.dev/github.com/uchaloop/confmaker/confx](https://pkg.go.dev/github.com/uchaloop/confmaker/confx)**.
+- [confmaker](https://pkg.go.dev/github.com/uchaloop/confmaker): tags, types,
+  loading, manifest and dump.
+- [confx](https://pkg.go.dev/github.com/uchaloop/confmaker/confx): the Fx adapter.
 
 ## Acknowledgements
 

@@ -1,4 +1,4 @@
-package confx
+package confmaker
 
 import (
 	"fmt"
@@ -44,10 +44,14 @@ func (c moneyConfig) Validate() error {
 }
 
 func TestCustomTypeParsesThroughItsOwnTextForm(t *testing.T) {
-	t.Setenv("APP_PRICE", "1250")
+	t.Parallel()
 
-	var cfg moneyConfig
-	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+	env := map[string]string{
+		"APP_PRICE": "1250",
+	}
+
+	cfg, err := Load[moneyConfig](WithName("app"), WithEnv(env))
+	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
@@ -57,11 +61,14 @@ func TestCustomTypeParsesThroughItsOwnTextForm(t *testing.T) {
 }
 
 func TestCustomTypeKeepsItsDefaultAndRendersIt(t *testing.T) {
+	t.Parallel()
+
 	// Nothing is set, so SetDefaults stands.
-	var cfg moneyConfig
-	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+	cfg, err := Load[moneyConfig](WithName("app"), WithEnv(nil))
+	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
+
 	if cfg.Price.cents != 499 {
 		t.Fatalf("price = %d, want the default", cfg.Price.cents)
 	}
@@ -73,45 +80,57 @@ func TestCustomTypeKeepsItsDefaultAndRendersIt(t *testing.T) {
 }
 
 func TestCustomTypeReportsItsOwnParseError(t *testing.T) {
-	t.Setenv("APP_PRICE", "free")
+	t.Parallel()
 
-	var cfg moneyConfig
-	err := fillEnv(&cfg, "APP_", "app")
+	env := map[string]string{
+		"APP_PRICE": "free",
+	}
+
+	_, err := Load[moneyConfig](WithName("app"), WithEnv(env))
 	if err == nil {
 		t.Fatal("a value the type rejects was accepted")
 	}
+
 	if !strings.Contains(err.Error(), "APP_PRICE") || !strings.Contains(err.Error(), "cents") {
 		t.Fatalf("the error names neither the variable nor the type's reason: %v", err)
 	}
 }
 
 func TestCustomTypeIsValidatedByTheConfig(t *testing.T) {
-	t.Setenv("APP_PRICE", "0")
+	t.Parallel()
 
-	var cfg moneyConfig
-	err := fillEnv(&cfg, "APP_", "app")
+	env := map[string]string{
+		"APP_PRICE": "0",
+	}
+
+	_, err := Load[moneyConfig](WithName("app"), WithEnv(env))
 	if err == nil || !strings.Contains(err.Error(), "price must be positive") {
 		t.Fatalf("Validate did not see the parsed value: %v", err)
 	}
 }
 
 func TestCustomTypeInCollections(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"APP_PRICES": "1,2,3",
+		"APP_TIERS":  "basic:100,pro:900",
+	}
+
 	type config struct {
 		Prices []money          `env:"PRICES"`
 		Tiers  map[string]money `env:"TIERS"`
 	}
 
-	t.Setenv("APP_PRICES", "1,2,3")
-	t.Setenv("APP_TIERS", "basic:100,pro:900")
-
-	var cfg config
-	if err := fillEnv(&cfg, "APP_", "app"); err != nil {
+	cfg, err := Load[config](WithName("app"), WithEnv(env))
+	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
 	if len(cfg.Prices) != 3 || cfg.Prices[2].cents != 3 {
 		t.Fatalf("slice elements were not decoded: %v", cfg.Prices)
 	}
+
 	if cfg.Tiers["pro"].cents != 900 {
 		t.Fatalf("map values were not decoded: %v", cfg.Tiers)
 	}
@@ -128,7 +147,7 @@ func TestUntaggedFieldHoldingAStructIsNotConfiguration(t *testing.T) {
 		Tiers  map[string]money
 	}
 
-	got := names(described[config](t, "APP_"))
+	got := names(manifested[config](t, "app"))
 	if len(got) != 1 || got[0] != "APP_HOST" {
 		t.Fatalf("manifest = %v, want only APP_HOST", got)
 	}
@@ -163,6 +182,7 @@ func TestNestedConfigIsStillRefused(t *testing.T) {
 		type outer struct {
 			Inner shard
 		}
+
 		type config struct {
 			Items []outer
 		}

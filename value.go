@@ -1,4 +1,4 @@
-package confx
+package confmaker
 
 import (
 	"encoding"
@@ -31,8 +31,8 @@ type parser func(target reflect.Value, raw string) error
 // fieldParser returns the parser for a whole config field, or an error saying
 // why the field cannot be read from a variable.
 //
-// It is chosen once, when the config is bound, and the binding keeps it. That is
-// what makes a field of an unreadable type fail at startup rather than on the
+// It is chosen once, when the schema is compiled, and the schema keeps it. That is
+// what makes a field of an unreadable type fail when it is registered rather than on the
 // first deployment that happens to set its variable, and it leaves one place
 // that decides what a type means.
 func fieldParser(t reflect.Type, separator, keyValSeparator string) (parser, error) {
@@ -112,6 +112,7 @@ func sliceParser(t reflect.Type, separator string) (parser, error) {
 	if t.Elem() == byteType {
 		return nil, errors.New("a byte slice has no unambiguous text form; use a string")
 	}
+
 	// Splitting on nothing yields one element per character.
 	if len(separator) == 0 {
 		return nil, errors.New("envSeparator is empty; a slice needs something to split on")
@@ -146,6 +147,7 @@ func mapParser(t reflect.Type, separator, keyValSeparator string) (parser, error
 	if len(separator) == 0 {
 		return nil, errors.New("envSeparator is empty; a map needs something to split entries on")
 	}
+
 	if len(keyValSeparator) == 0 {
 		return nil, errors.New("envKeyValSeparator is empty; a map needs something to split a key from its value")
 	}
@@ -161,21 +163,31 @@ func mapParser(t reflect.Type, separator, keyValSeparator string) (parser, error
 	}
 
 	return func(target reflect.Value, raw string) error {
-		result := reflect.MakeMap(t)
+		if len(raw) == 0 {
+			target.Set(reflect.MakeMap(t))
+			return nil
+		}
 
-		for _, entry := range splitNonEmpty(raw, separator) {
+		result := reflect.MakeMapWithSize(t, strings.Count(raw, separator)+1)
+		// SetMapIndex copies, so one key and one value serve every entry. Each is
+		// reset first: a type's UnmarshalText need not overwrite all of itself.
+		key, value := reflect.New(t.Key()).Elem(), reflect.New(t.Elem()).Elem()
+
+		for entry := range strings.SplitSeq(raw, separator) {
 			rawKey, rawValue, found := strings.Cut(entry, keyValSeparator)
 			if !found {
 				return fmt.Errorf("entry %q has no %q separating key from value", entry, keyValSeparator)
 			}
+
 			if err := checkUntrimmed(rawKey, "key"); err != nil {
 				return err
 			}
+
 			if err := checkUntrimmed(rawValue, "value"); err != nil {
 				return err
 			}
 
-			key := reflect.New(t.Key()).Elem()
+			key.SetZero()
 			if err := parseKey(key, rawKey); err != nil {
 				return fmt.Errorf("key %q: %w", rawKey, err)
 			}
@@ -184,7 +196,7 @@ func mapParser(t reflect.Type, separator, keyValSeparator string) (parser, error
 				return fmt.Errorf("key %q appears more than once", rawKey)
 			}
 
-			value := reflect.New(t.Elem()).Elem()
+			value.SetZero()
 			if err := parseValue(value, rawValue); err != nil {
 				return fmt.Errorf("key %q: %w", rawKey, err)
 			}
@@ -296,80 +308,140 @@ func checkUntrimmed(part, kind string) error {
 	return nil
 }
 
-// textOf renders a value through the text form it declares, if it declares one.
-// The method set of *T is preferred, the same one UnmarshalText is looked up in,
-// so a type whose marshaller takes a pointer receiver renders the way it parses.
-// A value that cannot be addressed - a map key, a map value - is asked directly.
-func textOf(value reflect.Value) (string, bool) {
-	candidate := value
-	if value.CanAddr() {
-		candidate = value.Addr()
+// textOf uses the same pointer method set as the parser. Map entries need an
+// addressable copy to expose pointer-receiver MarshalText methods.
+func textOf(value reflect.Value) (string, bool, error) {
+	if !value.CanAddr() {
+		copy := reflect.New(value.Type()).Elem()
+		copy.Set(value)
+		value = copy
 	}
 
-	switch declared := candidate.Interface().(type) {
-	case encoding.TextMarshaler:
-		text, err := declared.MarshalText()
-		if err != nil {
-			return "", false
-		}
-
-		return string(text), true
-	case fmt.Stringer:
-		return declared.String(), true
-	default:
-		return "", false
+	if marshaler, ok := reflect.TypeAssert[encoding.TextMarshaler](value.Addr()); ok {
+		text, err := marshaler.MarshalText()
+		return string(text), true, err
 	}
+
+	return "", false, nil
 }
 
-// renderValue turns a field's current value back into the text a variable would
-// carry. A type that declares its own text form decides how it appears, and a
-// slice or map is joined with the separators its field declares, so the result
-// can be pasted back into the environment it came from.
-func renderValue(value reflect.Value, separator, keyValSeparator string) string {
-	// A pointer is resolved before its text form is looked for. MarshalText and
-	// String are usually declared on the value, and the pointer method promoted
-	// from such a declaration dereferences its receiver - so asking a nil
-	// *time.Time to render itself panics rather than yielding nothing.
+// renderValue encodes a default using the field's ENV syntax. Nil pointers
+// render as an empty placeholder; leaving their variable unset preserves nil.
+// Stringer is intentionally not used: display text need not be parseable.
+func renderValue(value reflect.Value, separator, keyValSeparator string) (string, error) {
 	if value.Kind() == reflect.Pointer {
 		if value.IsNil() {
-			return ""
+			return "", nil
 		}
 
 		return renderValue(value.Elem(), separator, keyValSeparator)
 	}
 
-	if text, ok := textOf(value); ok {
-		return text
+	if declaresTextForm(value.Type()) {
+		if text, ok, err := textOf(value); ok {
+			return text, err
+		}
+
+		return "", fmt.Errorf("%s implements TextUnmarshaler but not TextMarshaler", value.Type())
+	}
+
+	if value.Type() == durationType {
+		return time.Duration(value.Int()).String(), nil
 	}
 
 	switch value.Kind() {
+	case reflect.String:
+		return value.String(), nil
+	case reflect.Bool:
+		return strconv.FormatBool(value.Bool()), nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(value.Int(), 10), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(value.Uint(), 10), nil
+	case reflect.Float32, reflect.Float64:
+		return strconv.FormatFloat(value.Float(), 'g', -1, value.Type().Bits()), nil
 	case reflect.Slice:
 		parts := make([]string, value.Len())
 		for i := range parts {
-			parts[i] = renderValue(value.Index(i), separator, keyValSeparator)
+			var err error
+			parts[i], err = renderValue(value.Index(i), separator, keyValSeparator)
+			if err != nil {
+				return "", fmt.Errorf("element %d: %w", i, err)
+			}
+
+			if value.Index(i).Kind() == reflect.Pointer && value.Index(i).IsNil() {
+				return "", fmt.Errorf("element %d: a nil pointer cannot be represented in an ENV collection", i)
+			}
 		}
 
-		return strings.Join(parts, separator)
+		return joinParts(parts, separator)
 	case reflect.Map:
 		return renderMap(value, separator, keyValSeparator)
 	default:
-		return fmt.Sprint(value.Interface())
+		return "", fmt.Errorf("%s has no ENV text representation", value.Type())
 	}
 }
 
-// renderMap joins a map's entries in key order, so the same map always renders
-// the same way.
-func renderMap(value reflect.Value, separator, keyValSeparator string) string {
-	parts := make([]string, 0, value.Len())
+// joinParts also detects separators overlapping element boundaries, including
+// multi-byte separators, and the ambiguous one-element empty slice.
+func joinParts(parts []string, separator string) (string, error) {
+	raw := strings.Join(parts, separator)
+	if !slices.Equal(splitNonEmpty(raw, separator), parts) {
+		return "", fmt.Errorf("collection cannot be represented with envSeparator %q without losing elements", separator)
+	}
 
+	return raw, nil
+}
+
+// renderMap sorts encoded entries to make the output deterministic.
+func renderMap(value reflect.Value, separator, keyValSeparator string) (string, error) {
+	parts := make([]string, 0, value.Len())
 	iter := value.MapRange()
 	for iter.Next() {
-		parts = append(parts, renderValue(iter.Key(), separator, keyValSeparator)+
-			keyValSeparator+
-			renderValue(iter.Value(), separator, keyValSeparator))
+		key, item := iter.Key(), iter.Value()
+		if (key.Kind() == reflect.Pointer && key.IsNil()) || (item.Kind() == reflect.Pointer && item.IsNil()) {
+			return "", errors.New("a nil pointer cannot be represented in an ENV map")
+		}
+
+		k, err := renderValue(key, separator, keyValSeparator)
+		if err != nil {
+			return "", fmt.Errorf("map key: %w", err)
+		}
+
+		v, err := renderValue(item, separator, keyValSeparator)
+		if err != nil {
+			return "", fmt.Errorf("map value: %w", err)
+		}
+
+		if err := checkUntrimmed(k, "key"); err != nil {
+			return "", err
+		}
+
+		if err := checkUntrimmed(v, "value"); err != nil {
+			return "", err
+		}
+
+		entry := k + keyValSeparator + v
+		parsedKey, parsedValue, found := strings.Cut(entry, keyValSeparator)
+		if !found || parsedKey != k || parsedValue != v {
+			return "", fmt.Errorf("map entry cannot be represented with envKeyValSeparator %q", keyValSeparator)
+		}
+
+		parts = append(parts, entry)
 	}
 
 	slices.Sort(parts)
+	// Distinct Go keys may marshal to the same text. Such a default would be
+	// rejected as duplicate keys when read back.
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		key, _, _ := strings.Cut(part, keyValSeparator)
+		if _, ok := seen[key]; ok {
+			return "", errors.New("map keys have duplicate ENV text representations")
+		}
 
-	return strings.Join(parts, separator)
+		seen[key] = struct{}{}
+	}
+
+	return joinParts(parts, separator)
 }

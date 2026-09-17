@@ -1,27 +1,52 @@
-name: Release
+name: Release confx
 
-# Tags of the core module only: "v*" does not match confx/v*, which
-# release-confx.yml publishes.
+# Tags of the nested module github.com/uchaloop/confmaker/confx: confx/vX.Y.Z.
 on:
   push:
     tags:
-      - "v*"
+      - "confx/v*"
 
 permissions:
   contents: read
 
 jobs:
+  # The adapter as users get it: its own go.mod, no workspace, the core release
+  # it requires.
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: confx
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: confx/go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
   pkg-go-dev:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - name: Trigger pkg.go.dev to index the release
         env:
-          MODULE: github.com/uchaloop/confmaker
+          MODULE: github.com/uchaloop/confmaker/confx
         run: |
-          version="${GITHUB_REF_NAME}"
+          # The proxy knows the version without the module's directory prefix.
+          version="${GITHUB_REF_NAME#confx/}"
           curl -fsS "https://proxy.golang.org/${MODULE}/@v/${version}.info"
 
   release:
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -34,23 +59,23 @@ jobs:
 
       - name: Take the release notes from the changelog
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${GITHUB_REF_NAME#confx/v}"
 
           awk -v v="$version" '
             $0 ~ "^## \\[" v "\\]" { found = 1; next }
             found && /^## / { exit }
             found
-          ' CHANGELOG.md > notes.md
+          ' confx/CHANGELOG.md > notes.md
 
           # A tag whose version is still filed under Unreleased would publish an
           # empty release. Say so instead.
           if ! grep -q '[^[:space:]]' notes.md; then
-            echo "CHANGELOG.md has no section for ${version}" >&2
+            echo "confx/CHANGELOG.md has no section for ${version}" >&2
             exit 1
           fi
 
-          # --match keeps confx/v* tags, which belong to the other module, out.
-          previous="$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          # Only this module's tags: the core's v* tags are a different history.
+          previous="$(git describe --tags --abbrev=0 --match 'confx/v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
           if [ -n "$previous" ]; then
             printf '\n**Full Changelog**: %s/compare/%s...%s\n' \
               "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
@@ -66,7 +91,7 @@ jobs:
           # Everything before 1.0 is published as a pre-release: the API is still
           # allowed to break between minors.
           case "${GITHUB_REF_NAME}" in
-            v0.*) args+=(--prerelease) ;;
+            confx/v0.*) args+=(--prerelease) ;;
           esac
 
           gh release create "${GITHUB_REF_NAME}" "${args[@]}"

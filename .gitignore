@@ -20,9 +20,9 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Go workspace file
-go.work
-go.work.sum
+# go.work is committed on purpose: confmaker and confx are developed together.
+# CI also checks each module with GOWORK=off, so the workspace cannot hide a
+# wrong go.mod.
 
 # env file
 .env
