@@ -13,7 +13,8 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - `confx` is a Go module of its own, `github.com/uchaloop/confmaker/confx`, in the
   confmaker repository and under the import path the package had in confmaker
-  v0.5.0 and earlier. It requires confmaker v0.6.0, which no longer contains it.
+  v0.5.0 and earlier. It requires confmaker v0.6.1, which no longer contains it
+  (v0.6.0 is retracted and still contains it).
 - `Module`, `Provide` and `ProvideNamed` provide configs loaded by one
   `confmaker.Loader` per application. `Module` takes `confmaker.EnvOption`
   (`WithEnv`, `WithDump`, `AllowUnknown`); `Provide` and `ProvideNamed` take
