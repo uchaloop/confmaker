@@ -1,12 +1,12 @@
-package confx
+package confmaker
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/uchaloop/secret/v2"
-	"go.uber.org/fx"
 )
 
 // manifestConfig covers what a generator has to render: a plain field, a nested
@@ -18,7 +18,7 @@ type manifestConfig struct {
 	} `envPrefix:"POOL_"`
 	Timeout  time.Duration `env:"TIMEOUT"`
 	Labels   map[string]string
-	Password secret.Secret `env:"PASSWORD,require"`
+	Password secret.Secret `env:"PASSWORD,required"`
 }
 
 // SetDefaults is where this config's defaults live, so code and tests see the
@@ -28,24 +28,11 @@ func (c *manifestConfig) SetDefaults() {
 	c.Timeout = 30 * time.Second
 }
 
-// described is the manifest of a T read under prefix, for tests that expect the
-// declaration to be valid.
-func described[T any](t *testing.T, prefix string) []Variable {
-	t.Helper()
-
-	variables, err := manifestOf[T](prefix)
-	if err != nil {
-		t.Fatalf("bind: %v", err)
-	}
-
-	return variables
-}
-
 // manifested is Manifest for a declaration the test expects to be valid.
-func manifested[T any](t *testing.T, name string, opts ...Option) []Variable {
+func manifested[T any](t *testing.T, name string, opts ...ConfigOption) []Variable {
 	t.Helper()
 
-	variables, err := Manifest[T](name, opts...)
+	variables, err := Manifest[T](append([]ConfigOption{WithName(name)}, opts...)...)
 	if err != nil {
 		t.Fatalf("manifest: %v", err)
 	}
@@ -58,7 +45,7 @@ func manifested[T any](t *testing.T, name string, opts ...Option) []Variable {
 func bindError[T any](t *testing.T) error {
 	t.Helper()
 
-	if _, err := manifestOf[T]("CONFXAPP_"); err != nil {
+	if _, err := compileSchema(reflect.TypeFor[T](), "CONFXAPP_"); err != nil {
 		return err
 	}
 
@@ -103,11 +90,12 @@ func TestManifestReportsFieldMetadata(t *testing.T) {
 	if pool.Default != "2" || !pool.HasDefault {
 		t.Errorf("the default from SetDefaults was not reported: %+v", pool)
 	}
+
 	if pool.Type != "int32" {
 		t.Errorf("type = %q, want int32", pool.Type)
 	}
 
-	// A duration renders through its own String method, so the default is text
+	// A duration renders in duration syntax, so the default is text
 	// the variable could carry back.
 	if timeout := byName["CONFXPOSTGRES_TIMEOUT"]; timeout.Default != "30s" {
 		t.Errorf("timeout default = %q, want 30s", timeout.Default)
@@ -118,8 +106,30 @@ func TestManifestReportsFieldMetadata(t *testing.T) {
 	}
 
 	password := byName["CONFXPOSTGRES_PASSWORD"]
-	if !password.Required || !password.Secret {
-		t.Errorf("the secret is not reported as required and secret: %+v", password)
+	if !password.Required || password.NotEmpty || !password.Secret {
+		t.Errorf("the secret is not reported as required, possibly empty, and secret: %+v", password)
+	}
+}
+
+func TestManifestSeparatesRequireFromNotEmpty(t *testing.T) {
+	type config struct {
+		Optional string `env:"OPTIONAL"`
+		Require  string `env:"REQUIRE,required"`
+		NotEmpty string `env:"NOT_EMPTY,notEmpty"`
+		Both     string `env:"BOTH,required,notEmpty"`
+	}
+
+	want := map[string][2]bool{
+		"CONFXAPP_OPTIONAL":  {false, false},
+		"CONFXAPP_REQUIRE":   {true, false},
+		"CONFXAPP_NOT_EMPTY": {true, true},
+		"CONFXAPP_BOTH":      {true, true},
+	}
+
+	for _, variable := range manifested[config](t, "confxapp") {
+		if got := [2]bool{variable.Required, variable.NotEmpty}; got != want[variable.Name] {
+			t.Errorf("%s: Required, NotEmpty = %v, want %v", variable.Name, got, want[variable.Name])
+		}
 	}
 }
 
@@ -131,23 +141,21 @@ func TestManifestHonoursWithPrefix(t *testing.T) {
 	}
 }
 
-// TestManifestMatchesTheStrictCheck pins Manifest to what Module accepts: every
-// name a generator emits has to survive the check that runs at startup.
+// TestManifestMatchesTheStrictCheck pins Manifest to what Load accepts: every
+// name a generator emits has to survive the unknown-variable check.
 func TestManifestMatchesTheStrictCheck(t *testing.T) {
-	for _, variable := range manifested[manifestConfig](t, "confxpostgres") {
-		t.Setenv(variable.Name, "1")
-	}
-	t.Setenv("CONFXPOSTGRES_HOST", "db:5432")
-	t.Setenv("CONFXPOSTGRES_TIMEOUT", "1s")
+	t.Parallel()
 
-	err := fx.New(
-		fx.NopLogger,
-		Module(),
-		Provide[manifestConfig]("confxpostgres"),
-		fx.Invoke(func(manifestConfig) {}),
-	).Err()
-	if err != nil {
-		t.Fatalf("a variable the manifest lists was rejected at startup: %v", err)
+	env := make(map[string]string)
+	for _, variable := range manifested[manifestConfig](t, "confxpostgres") {
+		env[variable.Name] = "1"
+	}
+
+	env["CONFXPOSTGRES_HOST"] = "db:5432"
+	env["CONFXPOSTGRES_TIMEOUT"] = "1s"
+
+	if _, err := Load[manifestConfig](WithEnv(env), WithName("confxpostgres")); err != nil {
+		t.Fatalf("a variable the manifest lists was rejected by Load: %v", err)
 	}
 }
 
@@ -181,7 +189,7 @@ func TestManifestOmitsSecretValueFromDefault(t *testing.T) {
 
 	// A default that is a secret still renders through the type's own text form,
 	// which is a mask.
-	variables := described[config](t, "CONFXAPP_")
+	variables := manifested[config](t, "confxapp")
 	if strings.Contains(variables[0].Default, "s3cr3t") {
 		t.Fatalf("a secret leaked into the manifest: %q", variables[0].Default)
 	}
@@ -202,6 +210,7 @@ func TestBindWalksNestedAndEmbedded(t *testing.T) {
 	type pool struct {
 		MaxConns int `env:"MAX_CONNS"`
 	}
+
 	type config struct {
 		Embedded
 		unexportedEmbedded
@@ -212,7 +221,7 @@ func TestBindWalksNestedAndEmbedded(t *testing.T) {
 	}
 
 	got := make(map[string]Variable)
-	for _, variable := range described[config](t, "CONFXAPP_") {
+	for _, variable := range manifested[config](t, "confxapp") {
 		got[variable.Name] = variable
 	}
 
@@ -221,9 +230,11 @@ func TestBindWalksNestedAndEmbedded(t *testing.T) {
 			t.Errorf("the walk did not report %q, got %v", want, keys(got))
 		}
 	}
+
 	if len(got) != 4 {
 		t.Errorf("the walk reported extra variables: %v", keys(got))
 	}
+
 	if !got["CONFXAPP_PASSWORD"].Secret || !got["CONFXAPP_PASSWORD"].Required {
 		t.Error("the secret was not reported as secret and required")
 	}
@@ -232,9 +243,12 @@ func TestBindWalksNestedAndEmbedded(t *testing.T) {
 // TestBindFillsWhatItDescribes is the property the single traversal exists for:
 // the variables a config reports are exactly the variables that fill it.
 func TestBindFillsWhatItDescribes(t *testing.T) {
+	t.Parallel()
+
 	type pool struct {
 		MaxConns int `env:"MAX_CONNS"`
 	}
+
 	type config struct {
 		Embedded
 		unexportedEmbedded
@@ -242,47 +256,70 @@ func TestBindFillsWhatItDescribes(t *testing.T) {
 		Pool pool   `envPrefix:"POOL_"`
 	}
 
-	for _, variable := range described[config](t, "CONFXAPP_") {
-		t.Setenv(variable.Name, "7")
+	env := make(map[string]string)
+	for _, variable := range manifested[config](t, "confxapp") {
+		env[variable.Name] = "7"
 	}
-	t.Setenv("CONFXAPP_HOST", "db:5432")
-	t.Setenv("CONFXAPP_SHARED", "shared")
-	t.Setenv("CONFXAPP_IGNORED", "ignored")
+
+	env["CONFXAPP_HOST"] = "db:5432"
+	env["CONFXAPP_SHARED"] = "shared"
+	env["CONFXAPP_IGNORED"] = "ignored"
+
+	// Binding alone: Load would also report the variables no field reads.
+	fields, err := compileSchema(reflect.TypeFor[config](), "CONFXAPP_")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var parsed config
-	if err := fillEnv(&parsed, "CONFXAPP_", "confxapp"); err != nil {
+	err = applyAndValidate(&parsed, fields, "confxapp", env)
+	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
 	if parsed.Host != "db:5432" || parsed.Shared != "shared" || parsed.Pool.MaxConns != 7 {
 		t.Fatalf("a described variable did not fill its field: %+v", parsed)
 	}
+
 	if len(parsed.Ignored) != 0 {
 		t.Fatal("a field the manifest omits was filled anyway")
 	}
 }
 
 func TestBindSkipsIgnoredField(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"CONFXAPP_HOST":             "db:5432",
+		"CONFXAPP_HIDDEN_MAX_CONNS": "2",
+	}
+
 	type pool struct {
 		MaxConns int `env:"MAX_CONNS"`
 	}
+
 	type config struct {
 		Host   string `env:"HOST"`
 		Hidden pool   `env:"-" envPrefix:"HIDDEN_"`
 	}
 
-	t.Setenv("CONFXAPP_HOST", "db:5432")
-	t.Setenv("CONFXAPP_HIDDEN_MAX_CONNS", "2")
+	// Binding alone: Load would also report the variables no field reads.
+	fields, err := compileSchema(reflect.TypeFor[config](), "CONFXAPP_")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var parsed config
-	if err := fillEnv(&parsed, "CONFXAPP_", "confxapp"); err != nil {
+	err = applyAndValidate(&parsed, fields, "confxapp", env)
+	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
 	if parsed.Hidden.MaxConns != 0 {
 		t.Fatal(`a field marked env:"-" was filled`)
 	}
-	if got := names(described[config](t, "CONFXAPP_")); len(got) != 1 || got[0] != "CONFXAPP_HOST" {
+
+	if got := names(manifested[config](t, "confxapp")); len(got) != 1 || got[0] != "CONFXAPP_HOST" {
 		t.Fatalf("manifest = %v, want only APP_HOST", got)
 	}
 }
@@ -308,6 +345,7 @@ func TestBindReportsEveryProblemAtOnce(t *testing.T) {
 	type pool struct {
 		MaxConns int `env:"MAX_CONNS"`
 	}
+
 	type config struct {
 		Timeout time.Duration `env:"TIMEOUT" envDefault:"30s"`
 		Pool    *pool         `envPrefix:"POOL_"`

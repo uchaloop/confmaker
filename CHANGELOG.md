@@ -5,6 +5,93 @@ All notable changes to this module are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.6.2] - 2026-09-17
+
+v0.6.0 and v0.6.1 were tagged on the v0.5.0 commit by mistake and hold the
+v0.5.0 code; both are retracted. This is the release they were meant to be,
+compared with v0.5.0.
+
+### Changed
+
+- **Breaking:** the Fx adapter `confx` moved out of this module into its own,
+  `github.com/uchaloop/confmaker/confx`, in the same repository and under the same
+  import path. This module no longer depends on Fx; Fx applications add the confx
+  module, whose changes are in `confx/CHANGELOG.md`.
+- **Breaking:** loading, options, the manifest and the dump live in package
+  `confmaker`. `confx.WithName`, `confx.WithPrefix`, `confx.WithDump`,
+  `confx.AllowUnknown` and `confx.Manifest` become `confmaker.WithName`,
+  `confmaker.WithPrefix`, `confmaker.WithDump`, `confmaker.AllowUnknown` and
+  `confmaker.Manifest`.
+- **Breaking:** the instance name is an option, not a positional argument:
+  `confmaker.WithName("app")`, or a `ConfigName() string` method on the config.
+- **Breaking:** options are typed by what they configure. A `ConfigOption`
+  (`WithName`, `WithPrefix`) configures one config; an `EnvOption` (`WithEnv`,
+  `WithDump`, `AllowUnknown`) configures a whole load. Passing the wrong kind does
+  not compile.
+- **Breaking:** the env tag option `require` is now `required`, as in
+  caarlos0/env; `require` is refused as an unknown option.
+- **Breaking:** `envSeparator` is refused on a field that is not a slice or map
+  read in the plain syntax, and `envKeyValSeparator` on a field that is not such a
+  map; both are refused without a variable name. They used to be ignored.
+- **Breaking:** a variable name containing `=` or NUL is refused.
+- A load joins every problem into one error: invalid registrations, conflicts,
+  unknown variables, variables that did not parse, and the `Validate` errors of
+  every config whose variables parsed. The report is ordered by instance name and
+  prefix, not by registration order.
+- A load takes one snapshot of the environment, shared by loading, the check for
+  unknown variables and the dump.
+- `SetDefaults` runs once per loaded config, and the dump describes that same
+  instance. The dump is written even when loading fails; a dump that cannot be
+  rendered or written is reported with the other problems. Conflicting
+  registrations stop loading before `SetDefaults` and the dump run.
+- Declarations are checked when a config is registered, before any default or
+  variable is read. Each registration compiles one immutable schema. A loaded
+  value is kept by its loader and returned by copy, but maps, slices and pointers
+  inside it are shared by every caller.
+- Manifest defaults are rendered with `MarshalText` or the field's plain syntax,
+  not `String`; a type read through `UnmarshalText` needs `MarshalText` only for
+  the manifest and the dump. Marshal errors are returned, and a collection default
+  its separators could not carry back is refused.
+- Map variables parse about twice as fast with a sixth of the allocations, and
+  typo hints compute only the diagonal band of the edit distance.
+- Documentation is split by purpose: the README to get started, the package
+  documentation for the exact rules.
+
+### Added
+
+- `Load[T]` loads one config in a call.
+- `Loader` loads a set of configs: `MakeLoader`, the generic method
+  `Loader.Add[T]` returning a `Handle[T]`, `Loader.Load` and `Handle.Value`.
+  Values are handed out only when the whole set loaded; `ErrNotLoaded` and
+  `ErrRegisteredAfterLoad` report a value read too early or registered too late.
+  `Load` runs once, and a concurrent `Load` waits for its result. A `Loader` is
+  safe for concurrent use and holds no lock while user code runs.
+- `WithEnv` loads from a map instead of the process environment. The map is the
+  complete environment (nil is empty) and is copied when passed.
+- `ConfigNamer`: a config's `ConfigName` method gives its default instance name.
+- `envFormat:"json"` reads structs, slices, arrays and maps, nested to any depth,
+  from one variable with `encoding/json/v2`. A set variable replaces the whole
+  field; unknown members are errors unless a JSON tag option says otherwise; `null`
+  is accepted only for pointers, slices and maps; durations are strings. Secret
+  types, `[]byte` and structs json/v2 rejects as objects are refused at
+  registration. Errors name the place inside the value and keep the original
+  `*json.SemanticError` or `*jsontext.SyntacticError` for `errors.As`.
+- `Variable.NotEmpty` separates `notEmpty` from `required`: `Required` means the
+  variable must be set, `NotEmpty` that it must also be non-empty.
+- Fuzz tests check that every plain field shape and JSON values never panic, and
+  that a loaded value renders to text that loads back to the same value.
+
+### Fixed
+
+- A secret behind two or more pointers (`***secret.Secret`) was printed by the
+  dump, and a slice or map of such secrets was accepted. Secrets are recognised
+  behind any number of pointers.
+- Repeated instance names are refused even across different config types or
+  prefixes, so matching names no longer hide variable conflicts.
+- Dump values escape control characters without exposing secrets.
+
 ## [0.5.0] - 2026-09-01
 
 Two declarations that used to pass now fail when the config is bound: a secret in
@@ -232,7 +319,9 @@ its only dependencies.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/uchaloop/confmaker/compare/v0.5.0...v0.6.2
+[0.5.0]: https://github.com/uchaloop/confmaker/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/uchaloop/confmaker/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/uchaloop/confmaker/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/uchaloop/confmaker/compare/v0.3.1...v0.4.0
