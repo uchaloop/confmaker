@@ -7,10 +7,11 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
-## [0.6.1] - 2026-09-17
+## [0.6.2] - 2026-09-17
 
-v0.6.0 was tagged on the v0.5.0 commit by mistake and holds the v0.5.0 code; it
-is retracted. This is the release v0.6.0 was meant to be, compared with v0.5.0.
+v0.6.0 and v0.6.1 were tagged on the v0.5.0 commit by mistake and hold the
+v0.5.0 code; both are retracted. This is the release they were meant to be,
+compared with v0.5.0.
 
 ### Changed
 
@@ -318,8 +319,8 @@ its only dependencies.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.6.1...HEAD
-[0.6.1]: https://github.com/uchaloop/confmaker/compare/v0.5.0...v0.6.1
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/uchaloop/confmaker/compare/v0.5.0...v0.6.2
 [0.5.0]: https://github.com/uchaloop/confmaker/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/uchaloop/confmaker/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/uchaloop/confmaker/compare/v0.4.0...v0.4.1
