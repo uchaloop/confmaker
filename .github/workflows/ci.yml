@@ -2,19 +2,25 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/**'
+
   pull_request:
-    branches: [main]
+    branches:
+      - main
+
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  # The core module on its own: go.work must not be what makes it build.
-  core:
+  build:
     runs-on: ubuntu-latest
     env:
       GOWORK: "off"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -25,7 +31,6 @@ jobs:
 
       - name: Check formatting
         run: |
-          # Both modules: gofmt walks the whole tree.
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
             echo "These files are not gofmt-ed:"
@@ -33,47 +38,8 @@ jobs:
             exit 1
           fi
 
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test
-        run: go test -race ./...
-
-  # Both modules through go.work: the adapter against the core in this commit.
-  # ./... from the root stops at confx/go.mod, so confx is named explicitly.
-  workspace:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.work
-
-      - name: Vet
-        run: go vet ./... ./confx/...
-
-      - name: Test
-        run: go test -race ./... ./confx/...
-
-  # confx on its own: its go.mod, the confmaker release it requires, no
-  # workspace - the adapter as users get it.
-  confx:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: confx
-    env:
-      GOWORK: "off"
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: confx/go.mod
-          cache-dependency-path: confx/go.sum
+      - name: Download dependencies
+        run: go mod download all
 
       - name: Vet
         run: go vet ./...

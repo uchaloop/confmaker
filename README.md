@@ -1,13 +1,10 @@
-<!--suppress HtmlDeprecatedAttribute -->
-<p align="center">
-  <img src="logo.png" alt="confmaker" width="320">
-</p>
+# confmaker
 
-<p align="center">
-  <a href="https://github.com/uchaloop/confmaker/actions/workflows/ci.yml"><img src="https://github.com/uchaloop/confmaker/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://pkg.go.dev/github.com/uchaloop/confmaker"><img src="https://pkg.go.dev/badge/github.com/uchaloop/confmaker.svg" alt="Go Reference"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/uchaloop/confmaker" alt="License: MIT"></a>
-</p>
+<p align="center"><img src="logo.png" alt="confmaker" width="240"></p>
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/uchaloop/confmaker.svg)](https://pkg.go.dev/github.com/uchaloop/confmaker) [![CI](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/tag/uchaloop/confmaker?label=release)](https://github.com/uchaloop/confmaker/tags) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+[Install](#installation) · [Quick start](#quick-start) · [How it works](#how-loading-works) · [Configuration](#configuration-rules) · [Examples](#testing)
 
 Typed configuration for Go, read from the environment and nowhere else
 ([12factor III](https://12factor.net/config)). A library declares its config as a
@@ -18,7 +15,7 @@ checks the environment for typos and validates the result.
 - **One report**: every problem of every config in one error, with suggestions
   for misspelled variables.
 - **A manifest** of every variable, for a `.env.example` or a config map.
-- **No framework required**; an [Fx adapter](confx) is a separate module.
+- **No framework required**; an [Fx adapter](https://github.com/uchaloop/confx) is a separate module.
 
 ## Installation
 
@@ -28,18 +25,19 @@ Requires Go 1.27 or later.
 go get github.com/uchaloop/confmaker
 ```
 
-Fx applications also add the adapter, described in [confx/README.md](confx/README.md):
-
-```bash
-go get github.com/uchaloop/confmaker/confx
-```
-
 ## Quick start
 
 A library declares what it needs and reads nothing:
 
 ```go
 package store
+
+import (
+    "fmt"
+    "time"
+
+    "github.com/uchaloop/secret/v2"
+)
 
 type Config struct {
 	Host     string        `env:"HOST,notEmpty"`
@@ -168,7 +166,9 @@ type Endpoint struct {
 STORE_ENDPOINTS=[{"url":"http://a:9000","timeout":"30s"}]
 ```
 
-A set variable **replaces the whole field**; nothing is merged with the default.
+> [!IMPORTANT]
+> A JSON environment value replaces the whole field; it does not merge with defaults.
+
 If the default had a timeout and the variable writes only `{"url":"http://a"}`,
 the timeout is zero - check such values in `Validate`. Unknown members are
 errors unless a JSON tag option such as `case:ignore` or an `embed` map says
@@ -206,7 +206,9 @@ store     STORE_PASSWORD  secret.Secret  (set)    env
 store     STORE_TIMEOUT   time.Duration  30s      default
 ```
 
-Fields of a secret type are never printed. A password written into a plain
+> [!NOTE]
+> Fields of a secret type are never printed.
+ A password written into a plain
 string, such as a URL, is not recognised as a secret: keep it in its own
 `secret.Secret` field.
 
@@ -237,13 +239,60 @@ them.
 
 - [confmaker](https://pkg.go.dev/github.com/uchaloop/confmaker): tags, types,
   loading, manifest and dump.
-- [confx](https://pkg.go.dev/github.com/uchaloop/confmaker/confx): the Fx adapter.
+- [confx](https://pkg.go.dev/github.com/uchaloop/confx): the Fx adapter.
+
+
+## Recommended configuration
+
+> [!TIP]
+> We recommend [confmaker](https://github.com/uchaloop/confmaker) for typed ENV
+> configuration and [confx](https://github.com/uchaloop/confx) for its Fx integration.
+> Configuration loading stays in the application; it is optional for the work libraries.
+
+<details>
+<summary><strong>Configure from ENV with confmaker / confx</strong></summary>
+
+The pair separates configuration declarations from application wiring. A
+library declares an ordinary struct; the application chooses how to load it:
+
+```go
+type Config struct {
+    Port int `env:"PORT"`
+}
+
+func (Config) ConfigName() string { return "server" }
+func (c *Config) SetDefaults() { c.Port = 8080 }
+```
+
+Without Fx:
+
+```go
+cfg, err := confmaker.Load[Config]() // SERVER_PORT, default 8080
+```
+
+With Fx:
+
+```go
+confx.Module(),
+confx.Provide[Config](),
+```
+
+Import `github.com/uchaloop/confmaker` for the loader or
+`github.com/uchaloop/confx` for the Fx adapter.
+
+</details>
+
+## Related libraries
+
+| Library | Purpose |
+|---|---|
+| [confx](https://github.com/uchaloop/confx) | Provide configurations through Fx |
+| [secret](https://github.com/uchaloop/secret) | Explicit secret values |
 
 ## Acknowledgements
 
-I am grateful to the authors of [Uber Fx](https://github.com/uber-go/fx), and to
-the authors of [env](https://github.com/caarlos0/env), whose tag vocabulary this
-library follows and whose implementation it learned from.
+Thanks also to the authors of [caarlos0/env](https://github.com/caarlos0/env)
+for the tag conventions and implementation ideas that informed confmaker.
 
 ## License
 

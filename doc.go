@@ -7,7 +7,7 @@ receives a ready value without reading the environment itself.
 
 [Load] reads one config. A [Loader] reads several together and reports the
 problems of all of them in one error. The Fx adapter is the separate module
-github.com/uchaloop/confmaker/confx.
+github.com/uchaloop/confx.
 
 # Overview
 

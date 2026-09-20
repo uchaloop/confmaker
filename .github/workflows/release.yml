@@ -1,7 +1,5 @@
 name: Release
 
-# Tags of the core module only: "v*" does not match confx/v*, which
-# release-confx.yml publishes.
 on:
   push:
     tags:
@@ -49,7 +47,7 @@ jobs:
             exit 1
           fi
 
-          # --match keeps confx/v* tags, which belong to the other module, out.
+          # Ignore historical nested-module tags when finding the previous release.
           previous="$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
           if [ -n "$previous" ]; then
             printf '\n**Full Changelog**: %s/compare/%s...%s\n' \
