@@ -7,6 +7,12 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-20
+
+- **Breaking:** the Fx adapter now lives in `github.com/uchaloop/confx`.
+  Use that independent module; this repository contains only the core library.
+- Updated documentation and CI for independent core and adapter releases.
+
 ## [0.6.2] - 2026-09-17
 
 v0.6.0 and v0.6.1 were tagged on the v0.5.0 commit by mistake and hold the
@@ -319,8 +325,8 @@ its only dependencies.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.6.2...HEAD
-[0.6.2]: https://github.com/uchaloop/confmaker/compare/v0.5.0...v0.6.2
+`[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.7.0...HEAD
+`[0.6.2]: https://github.com/uchaloop/confmaker/compare/v0.5.0...v0.6.2
 [0.5.0]: https://github.com/uchaloop/confmaker/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/uchaloop/confmaker/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/uchaloop/confmaker/compare/v0.4.0...v0.4.1
@@ -329,3 +335,5 @@ its only dependencies.
 [0.3.0]: https://github.com/uchaloop/confmaker/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.1.0
+
+[0.7.0]: https://github.com/uchaloop/confmaker/compare/v0.6.2...v0.7.0
