@@ -272,7 +272,7 @@ func TestBindFillsWhatItDescribes(t *testing.T) {
 	}
 
 	var parsed config
-	err = applyAndValidate(&parsed, fields, "confxapp", env)
+	err = applyAndValidate(&parsed, fields, "confxapp", env, nil)
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestBindSkipsIgnoredField(t *testing.T) {
 	}
 
 	var parsed config
-	err = applyAndValidate(&parsed, fields, "confxapp", env)
+	err = applyAndValidate(&parsed, fields, "confxapp", env, nil)
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}

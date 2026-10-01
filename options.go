@@ -20,7 +20,8 @@ type ConfigOption interface {
 	applyConfig(*configSettings)
 }
 
-// EnvOption configures a whole load: [WithEnv], [WithDump] and [AllowUnknown].
+// EnvOption configures a whole load: [WithEnv], [WithDump], [AllowUnknown],
+// [WithDiagnostics] and [WithDiagnosticHandler].
 // [MakeLoader] and [Load] take it.
 type EnvOption interface {
 	LoadOption
@@ -35,10 +36,13 @@ type configSettings struct {
 
 // envSettings holds the resolved options of a load.
 type envSettings struct {
-	allowed     []string
-	dump        io.Writer
-	env         environment
-	envRepeated bool
+	allowed           []string
+	dump              io.Writer
+	env               environment
+	envRepeated       bool
+	diagnostics       *Diagnostics
+	diagnosticHandler func(LoadReport)
+	diagnosticErr     error
 }
 
 type configOption func(*configSettings)

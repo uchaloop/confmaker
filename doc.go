@@ -259,6 +259,18 @@ fields do not contain ENV values, but ordinary error messages and user Validate
 errors may contain them. Writer and lifecycle errors remain separate; always
 handle the original error even when ConfigErrors returns no problems.
 
+# Load reports
+
+[WithDiagnostics] collects value-free [LoadReport] snapshots in a
+[Diagnostics] receiver. [WithDiagnosticHandler] handles a completed report
+synchronously before Load returns, on success or error. Neither option reads
+ENV again or repeats defaults, parsing or validation. Reports contain sources,
+statuses and error categories, never values, messages or causes. Collection is
+optional and independent of manifest generation. A receiver belongs to one
+loader; Report is safe for concurrent use and returns independent copies.
+Loading panics remain panics and skip the handler; the receiver records
+[LoadPanicked]. See [WithDiagnosticHandler] for completion and callback ordering.
+
 # Manifest, dump and secrets
 
 [Loader.Manifest] describes a snapshot of all registrations as []ConfigManifest,
@@ -284,6 +296,11 @@ unsuitable for dotenv assignments are preserved in quoted comments. This does
 not impose additional restrictions on names accepted by Load. The caller owns
 file handling; no dotenv file is read automatically. Manifest errors write
 nothing; writer errors may leave partial output.
+
+[MakeDescribeFlag] optionally registers -describe on a caller-supplied
+flag.FlagSet. After parsing, check DescribeFlag.Requested and call
+DescribeFlag.Write to export env, markdown or json. Unknown formats fail flag
+parsing. The helper does not parse arguments, load configs or exit the process.
 
 [Loader.WriteManifestJSON] exports a versioned JSON document with fixed
 camelCase keys, preserving all variable metadata except secret defaults.

@@ -9,11 +9,18 @@ what they need; the application registers their configs, loads ENV once and
 passes typed values to consumers. The core works independently of any framework;
 [confx](https://github.com/uchaloop/confx) adapts it to Uber Fx.
 
-[Install](#installation) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Rules](#configuration-rules) · [Manifest](#manifest-and-configuration-documentation) · [Reference](#reference)
+> [!NOTE]
+> confmaker supports the [Twelve-Factor Config](https://12factor.net/config)
+> approach: declare typed configuration in code and supply deployment-specific
+> values through ENV. Prefixes organize independent variables, not environment
+> profiles. Keep credentials and deployment-specific settings out of code
+> defaults; manifest and exports describe configuration rather than replace ENV.
+
+[Install](#installation) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Rules](#configuration-rules) · [Manifest](#manifest-and-configuration-documentation) · [Diagnostics](#load-reports) · [Reference](#reference)
 
 ## Installation
 
-Requires **Go 1.27 or later**. This README describes the **v0.8.0** API.
+Requires **Go 1.27 or later**. The command below installs the tagged release.
 
 ```sh
 go get github.com/uchaloop/confmaker@v0.8.0
@@ -207,6 +214,70 @@ It runs before parsing/validation completes: a dump is diagnostic output, not
 proof of success. Secret types are masked. Ordinary strings and user validation
 messages are not automatically sanitized.
 
+## Load reports
+
+Manifest describes declarations; diagnostics describe one actual load. Enable
+collection explicitly to inspect sources and results without recording values:
+
+```go
+diagnostics := confmaker.MakeDiagnostics()
+loader := confmaker.MakeLoader(confmaker.WithDiagnostics(diagnostics))
+loader.Register[StoreConfig]("store")
+
+err := loader.Load()
+report := diagnostics.Report() // Available even when err != nil.
+_ = report                    // Inspect or format it in application code.
+if err != nil {
+    return err
+}
+```
+
+`LoadReport` contains registration names, types, field paths, sources, statuses
+and structured `LoadProblem` categories. It contains no values, defaults, error
+messages or error causes. The original error returned by `Load` remains unchanged.
+`WithDump` is different: it prints values of non-secret fields.
+
+| Source | Meaning |
+| --- | --- |
+| `env` | ENV is present, including empty or invalid input |
+| `default` | ENV is absent and an optional field retains a nonzero default |
+| `zero` | ENV is absent and an optional field retains its zero value |
+| `missing` | Required ENV is absent, even if the field has a default |
+| `unknown` | The field was not processed |
+
+An explicit zero in `SetDefaults` is indistinguishable from an untouched zero.
+Field success means ENV application succeeded; `Validate` may still fail the
+config. Global problems can fail loading even when individual configs succeeded.
+`Problems` contains structured library errors; an unstructured error, such as a
+dump writer failure, can fail the load without adding a problem category. Writer
+error chains are not inspected; handle the original load error for those failures.
+
+All registrations are included, even invalid ones. Fields unavailable because
+schema compilation failed cannot be listed. Conflicts leave fields unprocessed.
+Before loading, `Report` returns `LoadNotStarted`; during loading it returns
+`LoadInProgress` without partial results. Finished reports are independent copies
+and safe to read concurrently. One Diagnostics receiver belongs to one loader;
+reusing it for another loader is a declaration error. Repeated `Load` calls reuse
+the original result and do not run handlers again. Manifest exports do not collect
+load diagnostics.
+
+For immediate processing, including `fx.New(...).Run()`, use a handler instead
+of a receiver, or combine both options:
+
+```go
+confmaker.WithDiagnosticHandler(func(report confmaker.LoadReport) {
+    // Send selected metadata to your application's logger or metrics.
+})
+```
+
+The handler runs synchronously after completion is published and before the
+executing `Load` returns, on success or error. It may read handles and reports or
+call `Load` again. Concurrent waiting callers may return before the handler ends.
+A loading panic propagates, stores `LoadPanicked` in the receiver, and skips the
+handler. Problems from completed stages remain available; an interrupted stage
+may have incomplete results. A handler panic propagates without changing the completed load result.
+Neither option logs automatically or terminates the process.
+
 ## Testing
 
 Use `WithEnv` to replace the process environment with an isolated map. The map is
@@ -278,6 +349,30 @@ for _, config := range configs {
 `confmaker.Manifest[StoreConfig]("postgres")` describes a single type instead.
 `Loader.Manifest` also checks conflicts between all registered configurations.
 The same names and options describe the same ENV variables.
+
+### Optional CLI helper
+
+To avoid repeating format selection, register a helper on your FlagSet:
+
+```go
+describe := confmaker.MakeDescribeFlag(flag.CommandLine)
+flag.Parse()
+
+loader := confmaker.MakeLoader()
+loader.Register[StoreConfig]("postgres")
+loader.Register[JobConfig]("job")
+
+if describe.Requested() {
+    return describe.Write(loader, os.Stdout)
+}
+// Continue with normal loading or pass the loader to confx.
+```
+
+Use `-describe=env`, `-describe=markdown` or `-describe=json`. Omission selects
+normal startup; an unknown or empty format is a flag parsing error. The helper
+does not parse flags or exit the process itself: your FlagSet controls error
+handling. It registers only on the supplied FlagSet, not in init. Use a dedicated
+FlagSet with ContinueOnError when the caller needs to handle parse errors.
 
 ### Choose an output
 

@@ -82,7 +82,7 @@ func BenchmarkLoadOne(b *testing.B) {
 						var err error
 						if mode == "compiled" {
 							setDefaults(&cfg)
-							err = applyAndValidate(&cfg, fields, "confxbench", env)
+							err = applyAndValidate(&cfg, fields, "confxbench", env, nil)
 						} else {
 							cfg, err = Load[benchConfig]("confxbench", WithEnv(env))
 						}
