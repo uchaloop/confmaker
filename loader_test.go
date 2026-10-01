@@ -606,3 +606,26 @@ func TestCopiedHandleSharesTypedResult(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleRegistrationMetadata(t *testing.T) {
+	loader := MakeLoader(WithEnv(nil))
+	handle := loader.Register[struct{}]("replica", WithPrefix("READ_"))
+	if handle.Name() != "replica" || !handle.BelongsTo(loader) || handle.BelongsTo(MakeLoader()) || handle.BelongsTo(nil) {
+		t.Fatal("incorrect metadata")
+	}
+	var nilHandle *Handle[struct{}]
+	if len(nilHandle.Name()) != 0 || nilHandle.BelongsTo(loader) {
+		t.Fatal("nil metadata")
+	}
+	zero := new(Handle[struct{}])
+	if len(zero.Name()) != 0 || zero.BelongsTo(loader) {
+		t.Fatal("zero metadata")
+	}
+	if err := loader.Load(); err != nil {
+		t.Fatal(err)
+	}
+	late := loader.Register[struct{}]("late")
+	if late.BelongsTo(loader) {
+		t.Fatal("late handle must not appear registered")
+	}
+}

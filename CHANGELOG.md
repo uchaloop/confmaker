@@ -7,6 +7,14 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-01
+- Added value-free load reports and completion handlers with `WithDiagnostics`
+  and `WithDiagnosticHandler`; preserved completed-stage problems after panics
+  and excluded dump writer error chains from report collection.
+- Added `MakeDescribeFlag` for explicit manifest export format selection.
+- Added `Handle.Name` and `Handle.BelongsTo` for registration metadata.
+- Improved Markdown rendering of ENV names, prefixes and Go types.
+
 ## [0.8.0] - 2026-10-01
 
 - Reject non-reflexive plain ENV map keys, including NaN and custom keys
@@ -349,8 +357,10 @@ its only dependencies.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/uchaloop/confmaker/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/uchaloop/confmaker/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/uchaloop/confmaker/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/uchaloop/confmaker/compare/v0.5.0...v0.6.2
 [0.5.0]: https://github.com/uchaloop/confmaker/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/uchaloop/confmaker/compare/v0.4.1...v0.4.2
@@ -360,5 +370,3 @@ its only dependencies.
 [0.3.0]: https://github.com/uchaloop/confmaker/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.1.0
-
-[0.7.0]: https://github.com/uchaloop/confmaker/compare/v0.6.2...v0.7.0

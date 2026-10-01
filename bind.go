@@ -215,8 +215,8 @@ func compileField(
 // applyAndValidate applies the environment over the defaults already in cfg and
 // validates the result. Validate runs only when every variable parsed: a
 // half-filled config would report problems that are not there.
-func applyAndValidate[T any](cfg *T, fields []fieldSpec, name string, env environment) error {
-	if err := applyEnvironment(reflect.ValueOf(cfg).Elem(), fields, env); err != nil {
+func applyAndValidate[T any](cfg *T, fields []fieldSpec, name string, env environment, report *ConfigReport) error {
+	if err := applyEnvironment(reflect.ValueOf(cfg).Elem(), fields, env, report); err != nil {
 		return wrapConfigError(name, err)
 	}
 
@@ -236,27 +236,56 @@ func applyAndValidate[T any](cfg *T, fields []fieldSpec, name string, env enviro
 // A variable that is not set
 // leaves its field untouched - that is what preserves the values SetDefaults
 // established - and every problem is reported together.
-func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environment) error {
+func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environment, report *ConfigReport) error {
 	var errs []error
 
-	for _, b := range fieldSpecs {
+	for i, b := range fieldSpecs {
 		raw, set := env[b.Name]
+		var variable *VariableReport
+		if report != nil {
+			variable = &report.Variables[i]
+			variable.Status = VariableNotProcessed
+			switch {
+			case set:
+				variable.Source = SourceEnv
+			case b.Required:
+				variable.Source = SourceMissing
+			case root.FieldByIndex(b.index).IsZero():
+				variable.Source = SourceZero
+			default:
+				variable.Source = SourceDefault
+			}
+		}
 
 		switch {
 		case !set && b.Required:
+			if variable != nil {
+				variable.Status = VariableFailed
+			}
 			errs = append(errs, makeConfigError(ErrorRequired, b.Name, b.field, fmt.Errorf("required variable %q is not set", b.Name)))
 
 			continue
 		case !set:
+			if variable != nil {
+				variable.Status = VariableSucceeded
+			}
 			continue
 		case b.NotEmpty && len(raw) == 0:
+			if variable != nil {
+				variable.Status = VariableFailed
+			}
 			errs = append(errs, makeConfigError(ErrorEmpty, b.Name, b.field, fmt.Errorf("variable %q is set but empty", b.Name)))
 
 			continue
 		}
 
 		if err := b.parse(root.FieldByIndex(b.index), raw); err != nil {
+			if variable != nil {
+				variable.Status = VariableFailed
+			}
 			errs = append(errs, describeParseError(b, err))
+		} else if variable != nil {
+			variable.Status = VariableSucceeded
 		}
 	}
 

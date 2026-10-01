@@ -24,7 +24,7 @@ func (l *Loader) WriteManifestMarkdown(writer io.Writer) error {
 	var output strings.Builder
 	output.WriteString("# Configuration manifest\n")
 	for _, config := range configs {
-		fmt.Fprintf(&output, "\n## %s\n\nPrefix: %s\n\n", escapeManifestMarkdownText(config.InstanceName), escapeManifestMarkdownText(config.Prefix))
+		fmt.Fprintf(&output, "\n## %s\n\nPrefix: %s\n\n", escapeManifestMarkdownText(config.InstanceName), manifestMarkdownCode(config.Prefix))
 		output.WriteString("| ENV | Type | Requirement | Secret | Default | Description |\n")
 		output.WriteString("| --- | --- | --- | --- | --- | --- |\n")
 		for _, variable := range config.Variables {
@@ -45,7 +45,7 @@ func (l *Loader) WriteManifestMarkdown(writer io.Writer) error {
 				defaultText = escapeManifestMarkdownText(variable.Default)
 			}
 			fmt.Fprintf(&output, "| %s | %s | %s | %s | %s | %s |\n",
-				escapeManifestMarkdownText(variable.Name), escapeManifestMarkdownText(variable.Type), requirement,
+				manifestMarkdownCode(variable.Name), manifestMarkdownCode(variable.Type), requirement,
 				secret, defaultText, escapeManifestMarkdownText(variable.Description))
 		}
 	}
@@ -77,4 +77,20 @@ func escapeManifestMarkdownText(value string) string {
 	}
 
 	return output.String()
+}
+
+// manifestMarkdownCode renders identifiers and types as readable inline code.
+// Unusual text falls back to escaped prose so it cannot break a table or span.
+func manifestMarkdownCode(value string) string {
+	for _, char := range value {
+		if char < 32 || char == 127 || char == '`' || char == '|' {
+			return escapeManifestMarkdownText(value)
+		}
+	}
+
+	if len(value) == 0 || strings.TrimSpace(value) != value {
+		return escapeManifestMarkdownText(value)
+	}
+
+	return "`" + value + "`"
 }

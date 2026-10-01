@@ -68,9 +68,9 @@ func TestWriteManifestMarkdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, text := range []string{
-		"## app\n", "Prefix: APP&#95;", "Required, non-empty", "API address<br>Use the staging endpoint",
-		"| APP&#95;TOKEN | secret.Secret | Required | Yes | — |",
-		"| APP&#95;COUNT | int | Optional | No | — |",
+		"## app\n", "Prefix: `APP_`", "Required, non-empty", "API address<br>Use the staging endpoint",
+		"| `APP_TOKEN` | `secret.Secret` | Required | Yes | — |",
+		"| `APP_COUNT` | `int` | Optional | No | — |",
 	} {
 		if !strings.Contains(output.String(), text) {
 			t.Fatalf("missing %q:\n%s", text, &output)
@@ -140,11 +140,11 @@ func ExampleLoader_WriteManifestMarkdown() {
 	//
 	// ## api
 	//
-	// Prefix: API&#95;
+	// Prefix: `API_`
 	//
 	// | ENV | Type | Requirement | Secret | Default | Description |
 	// | --- | --- | --- | --- | --- | --- |
-	// | API&#95;URL | string | Required, non-empty | No | — | Service endpoint |
+	// | `API_URL` | `string` | Required, non-empty | No | — | Service endpoint |
 }
 
 func TestManifestExportRenderErrorWritesNothing(t *testing.T) {
@@ -174,4 +174,17 @@ func ExampleLoader_WriteManifestJSON() {
 	//   "version": 1,
 	//   "configs": []
 	// }
+}
+
+func TestManifestMarkdownCode(t *testing.T) {
+	for _, value := range []string{"POSTGRES_HOST", "POSTGRES_", "[]string", "map[string]*int"} {
+		if got := manifestMarkdownCode(value); got != "`"+value+"`" {
+			t.Fatalf("identifier %q rendered as %q", value, got)
+		}
+	}
+	for _, value := range []string{"A|B", "A`B", "A\nB", "A\x00B"} {
+		if got := manifestMarkdownCode(value); got != escapeManifestMarkdownText(value) {
+			t.Fatalf("unsafe identifier %q rendered as %q", value, got)
+		}
+	}
 }

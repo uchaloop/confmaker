@@ -54,8 +54,9 @@ var errLoadPanicked = errors.New("configuration loading panicked")
 type registration struct {
 	descriptor
 	typeName string
+	name     string
 	err      error
-	fill     func(any, environment) error
+	fill     func(any, environment, *ConfigReport) error
 }
 
 // descriptor carries immutable schema and a factory for fresh defaults.
@@ -68,7 +69,8 @@ type descriptor struct {
 }
 
 // MakeLoader returns an empty [Loader]. opts configure the whole load: [WithEnv],
-// [WithDump], [AllowUnknown]. A nil option is reported by [Loader.Load].
+// [WithDump], [AllowUnknown], [WithDiagnostics] and [WithDiagnosticHandler].
+// A nil option is reported by [Loader.Load].
 func MakeLoader(opts ...EnvOption) *Loader {
 	l := &Loader{}
 	for _, opt := range opts {
@@ -79,6 +81,14 @@ func MakeLoader(opts ...EnvOption) *Loader {
 
 		opt.applyEnv(&l.env)
 	}
+
+	if l.env.diagnostics != nil {
+		if err := l.env.diagnostics.bindLoader(l); err != nil {
+			l.envErr = errors.Join(l.envErr, err)
+			l.env.diagnostics = nil
+		}
+	}
+	l.envErr = errors.Join(l.envErr, l.env.diagnosticErr)
 
 	return l
 }
@@ -103,15 +113,15 @@ func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
 	}
 
 	// Resolve the registration without holding the lock.
-	r := &registration{typeName: reflect.TypeFor[T]().String()}
+	r := &registration{typeName: reflect.TypeFor[T]().String(), name: name}
 	r.descriptor, r.err = makeDescriptor[T](name, opts)
 	// Handles, including copies, share typed storage. Value exposes it only
 	// after Load publishes completion under the loader mutex.
 	value := new(T)
 	if r.err == nil {
-		r.fill = func(defaults any, env environment) error {
+		r.fill = func(defaults any, env environment, report *ConfigReport) error {
 			cfg := defaults.(*T)
-			if err := applyAndValidate(cfg, r.fields, r.instanceName, env); err != nil {
+			if err := applyAndValidate(cfg, r.fields, r.instanceName, env, report); err != nil {
 				return err
 			}
 
@@ -131,7 +141,7 @@ func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
 
 	l.registrations = append(l.registrations, r)
 
-	return &Handle[T]{loader: l, value: value}
+	return &Handle[T]{loader: l, value: value, name: name}
 }
 
 // Load loads every registered config and returns every problem as one error:
@@ -166,17 +176,34 @@ func (l *Loader) Load() error {
 	registrations := slices.Clone(l.registrations)
 	l.mu.Unlock()
 
+	sortRegistrations(registrations)
+	var report *LoadReport
+	if l.env.diagnostics != nil || l.env.diagnosticHandler != nil {
+		report = makeLoadReport(registrations)
+		if l.env.diagnostics != nil {
+			l.env.diagnostics.publishReport(LoadReport{State: LoadInProgress})
+		}
+	}
+
 	err := errLoadPanicked
 	defer func() {
+		if report != nil {
+			setLoadReportState(report, err)
+		}
 		l.mu.Lock()
-		defer l.mu.Unlock()
-
 		l.err = err
 		l.state = loaded
+		if report != nil && l.env.diagnostics != nil {
+			l.env.diagnostics.publishReport(*report)
+		}
 		close(l.done)
+		l.mu.Unlock()
+		if report != nil && err != errLoadPanicked && l.env.diagnosticHandler != nil {
+			l.env.diagnosticHandler(cloneLoadReport(*report))
+		}
 	}()
 
-	err = l.load(registrations)
+	err = l.load(registrations, report)
 
 	return err
 }
@@ -184,7 +211,8 @@ func (l *Loader) Load() error {
 // Load loads one config of type T, as a [Loader] with a single registration would.
 // The required name determines the default ENV prefix. Options include
 // [ConfigOption] ([WithPrefix]) and [EnvOption]
-// ([WithEnv], [WithDump], [AllowUnknown]). Unknown variables are looked for under
+// ([WithEnv], [WithDump], [AllowUnknown], [WithDiagnostics],
+// [WithDiagnosticHandler]). Unknown variables are looked for under
 // T's own prefix only. On error it returns the zero T.
 //
 //	cfg, err := confmaker.Load[store.Config]("store")
@@ -223,7 +251,23 @@ func Load[T any](name string, opts ...LoadOption) (T, error) {
 type Handle[T any] struct {
 	loader *Loader
 	value  *T
+	name   string
 	err    error
+}
+
+// Name returns the explicit registration name, without reading ENV or loading.
+// A nil or zero handle has no name.
+func (h *Handle[T]) Name() string {
+	if h == nil {
+		return ""
+	}
+	return h.name
+}
+
+// BelongsTo reports whether this handle was registered with loader. Nil, zero
+// and rejected late handles belong to no loader. This does not load or validate.
+func (h *Handle[T]) BelongsTo(loader *Loader) bool {
+	return h != nil && loader != nil && h.loader == loader
 }
 
 // Value returns the loaded config, or an error:
@@ -283,8 +327,15 @@ func makeDescriptor[T any](name string, opts []ConfigOption) (descriptor, error)
 // attributed. Otherwise each config is given its defaults once, the dump
 // describes that same instance, and a failing dump is one more problem in the
 // report rather than a reason to skip the checks.
-func (l *Loader) load(registrations []*registration) error {
+func (l *Loader) load(registrations []*registration, report *LoadReport) error {
 	var errs []error
+	if report != nil {
+		defer func() {
+			for _, err := range errs {
+				recordLoadProblems(report, err)
+			}
+		}()
+	}
 	if l.envErr != nil {
 		errs = append(errs, l.envErr)
 	}
@@ -293,16 +344,18 @@ func (l *Loader) load(registrations []*registration) error {
 		errs = append(errs, makeConfigError(ErrorDeclaration, "", "", errors.New("WithEnv is given more than once; pass one complete environment")))
 	}
 
-	sortRegistrations(registrations)
-
 	ready := make([]*registration, 0, len(registrations))
-	for _, r := range registrations {
+	var readyReports []*ConfigReport
+	for index, r := range registrations {
 		if r.err != nil {
 			errs = append(errs, r.err)
 			continue
 		}
 
 		ready = append(ready, r)
+		if report != nil {
+			readyReports = append(readyReports, &report.Configs[index])
+		}
 	}
 
 	descriptors := make([]descriptor, len(ready))
@@ -312,7 +365,8 @@ func (l *Loader) load(registrations []*registration) error {
 
 	known, err := checkRegistrations(descriptors)
 	if err != nil {
-		return errors.Join(append(errs, err)...)
+		errs = append(errs, err)
+		return errors.Join(errs...)
 	}
 
 	env := l.env.env
@@ -334,7 +388,18 @@ func (l *Loader) load(registrations []*registration) error {
 	}
 
 	for i, r := range ready {
-		if err := r.fill(configs[i], env); err != nil {
+		var configReport *ConfigReport
+		if report != nil {
+			configReport = readyReports[i]
+		}
+		err := r.fill(configs[i], env, configReport)
+		if configReport != nil {
+			configReport.Status = ConfigSucceeded
+			if err != nil {
+				configReport.Status = ConfigFailed
+			}
+		}
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}

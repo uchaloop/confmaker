@@ -399,7 +399,7 @@ func TestRequiredIsAboutTheVariableNotTheValue(t *testing.T) {
 
 	// A default does not satisfy required: the deployment still has to supply it.
 	cfg := config{Host: "seeded"}
-	if err := applyAndValidate(&cfg, fields, "confxapp", nil); err == nil {
+	if err := applyAndValidate(&cfg, fields, "confxapp", nil, nil); err == nil {
 		t.Fatal("a seeded value satisfied required")
 	}
 }
