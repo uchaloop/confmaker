@@ -324,7 +324,7 @@ func TestCustomSeparators(t *testing.T) {
 		Plain   map[string]string `env:"PLAIN"`
 	}
 
-	cfg, err := Load[config](WithName("confxapp"), WithEnv(env))
+	cfg, err := Load[config]("confxapp", WithEnv(env))
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}

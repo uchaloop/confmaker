@@ -1,17 +1,40 @@
 /*
-Package confmaker builds typed configs from the environment. A library declares
-its config as a struct with env tags; an application loads it, and the library
-receives a ready value without reading the environment itself.
+Package confmaker centralizes explicit configuration of an application's packages,
+modules and domains. Each package declares a struct with env tags; the application
+registers its configs with instance names, loads them together and passes typed
+values to their consumers. Packages do not need to read ENV themselves.
 
-	cfg, err := confmaker.Load[store.Config]()
+Import the core library:
 
-[Load] reads one config. A [Loader] reads several together and reports the
-problems of all of them in one error. The Fx adapter is the separate module
-github.com/uchaloop/confx.
+	import "github.com/uchaloop/confmaker"
+
+A [Loader] is the composition point for multiple configurations, including
+multiple instances of the same type:
+
+	loader := confmaker.MakeLoader()
+	primary := loader.Register[store.Config]("postgres")
+	replica := loader.Register[store.Config]("replica")
+	if err := loader.Load(); err != nil {
+		return err
+	}
+	primaryConfig, err := primary.Value()
+	if err != nil {
+		return err
+	}
+	replicaConfig, err := replica.Value()
+	if err != nil {
+		return err
+	}
+	// Pass primaryConfig and replicaConfig to their consumers.
+
+[Load] is a convenience for loading one configuration. The separate module
+github.com/uchaloop/confx adapts the same loading rules to Uber Fx. This package
+reads ENV only: it does not read dotenv files, contact secret stores or start
+application services. Manifest generation and exports are optional.
 
 # Overview
 
-A config is a struct with env tags and, optionally, three methods:
+A config is a struct with env tags and, optionally, two methods:
 
 	type Config struct {
 		Host     string        `env:"HOST,notEmpty"`
@@ -19,21 +42,26 @@ A config is a struct with env tags and, optionally, three methods:
 		Password secret.Secret `env:"PASSWORD"`
 	}
 
-	func (Config) ConfigName() string { return "store" }
-	func (c *Config) SetDefaults()    { c.Timeout = 30 * time.Second }
-	func (c Config) Validate() error  { ... }
+	func (c *Config) SetDefaults() { c.Timeout = 30 * time.Second }
+	func (c Config) Validate() error {
+		if c.Timeout <= 0 {
+			return fmt.Errorf("timeout must be positive")
+		}
+		return nil
+	}
 
-It reads STORE_HOST, STORE_TIMEOUT and STORE_PASSWORD. The tags are plain
-strings, so the type depends on github.com/uchaloop/secret/v2 for the secret
-field and not on this package.
+With instance name "store", it reads STORE_HOST, STORE_TIMEOUT and
+STORE_PASSWORD. The tags are plain strings, so the config type need not import confmaker.
+This example imports github.com/uchaloop/secret/v2 for its secret field.
 
 # Declaring configurations
 
 A field that names a variable in its env tag is read from that variable. A
 struct field without an env tag is not read itself: its fields are, and those
 with env tags become variables of the config, under the prefix extended by the
-field's envPrefix tag, if any. Any other field without an env tag is not
-configuration. env:"-" excludes a field and everything nested in it.
+field's envPrefix tag, if any. Untagged fields that contain no configuration
+are ignored; unsupported pointer or collection nesting of config fields is
+rejected. env:"-" excludes a field and everything nested in it.
 
 	type Config struct {
 		Host string     `env:"HOST"`
@@ -43,8 +71,8 @@ configuration. env:"-" excludes a field and everything nested in it.
 	STORE_HOST
 	STORE_POOL_MAX_CONNS
 
-A nested config is nested by value: the variables a config reads are known from
-its type, which a pointer or a collection could not promise. envPrefix is written
+A nested config must be held by value. This gives the application a fixed set
+of fields independent of pointer allocation or collection contents. envPrefix is written
 into names as it stands, with or without a trailing underscore.
 
 A field may be a string, a bool, any sized integer or float, a time.Duration, a
@@ -70,7 +98,7 @@ reads its element the same way.
 
 Each field's variable is read under these tag options:
 
-  - required: the variable must be set; an empty value is allowed;
+  - required: the variable must be set; empty text is allowed if its type can parse it;
   - notEmpty: the variable must be set and its text must be non-empty. It checks
     the text, not the result: JSON [] is non-empty text for an empty slice. Limits
     on what a value holds belong in Validate.
@@ -78,8 +106,16 @@ Each field's variable is read under these tag options:
 A default does not satisfy either option: they concern what the deployment
 supplies.
 
+Pointer-only type cycles are rejected as declaration errors. Pointers to scalar
+values remain supported, including multiple levels. Untagged nested configs must
+be structs held by value; hiding them behind pointers or collections at any
+depth is rejected. Plain ENV maps cannot use pointer keys, whose address
+identity would bypass duplicate-key checks. Parsed keys must equal themselves:
+NaN keys, including custom keys containing NaN, are rejected. NaN values remain
+valid. Recursive JSON structs remain valid.
+
 Declarations are checked when a config is registered, before any default or
-variable is read, and a mistake is reported by [Loader.Load] or [Manifest]:
+variable is read, and a mistake is reported by [Loader.Load], [Loader.Manifest] or [Manifest]:
 envDefault (defaults belong in SetDefaults), an unknown option or options
 without a name, two fields on one variable, envPrefix on anything but a struct
 nested by value, a secret in a slice, array or map, a config nested through a
@@ -91,14 +127,14 @@ Secrets are recognised behind any number of pointers.
 
 Every config has an instance name. It gives the default prefix - "read-replica"
 reads READ_REPLICA_* - and labels the config in errors. It comes from
-[WithName] or, without it, from the config's ConfigName method ([ConfigNamer]):
+the required first argument of [Loader.Register], [Load] or [Manifest]:
 
-	loader.Add[Config]()                                 // "store", STORE_*
-	loader.Add[Config](confmaker.WithName("replica"))    // "replica", REPLICA_*
-	loader.Add[Config](confmaker.WithPrefix("MAIN_DB_")) // "store", MAIN_DB_*
+	loader.Register[Config]("store")   // STORE_*
+	loader.Register[Config]("replica") // REPLICA_*
+	loader.Register[Config]("main", confmaker.WithPrefix("MAIN_DB_")) // MAIN_DB_*
 
 Names hold lowercase letters, digits and _ - ., and do not start or end with a
-separator. A config with neither WithName nor ConfigName cannot be registered.
+separator. An empty name is invalid, even with WithPrefix.
 Two registrations may not share a name, a prefix, or a variable.
 
 Options come in two kinds: a [ConfigOption] configures one config, an
@@ -116,13 +152,15 @@ Loading a config runs these steps:
     variable of the config parsed.
 
 SetDefaults must be deterministic and free of side effects: loading calls it
-once per config, and every [Manifest] call calls it again. Only the top-level
+once per config, and each manifest or export call evaluates it again on a fresh
+instance. Only the top-level
 config's methods are called.
 
 # JSON values
 
 envFormat:"json" reads one variable as JSON, with encoding/json/v2, into a
-struct, slice, array or map, or a pointer to one, nested to any depth:
+struct, slice, array or map, or a pointer directly to one of these shapes.
+Supported members inside that JSON value may themselves be nested:
 
 	type Config struct {
 		Endpoints []Endpoint `env:"ENDPOINTS" envFormat:"json"`
@@ -133,10 +171,10 @@ struct, slice, array or map, or a pointer to one, nested to any depth:
 The value is decoded into the field's type:
 
   - A set variable replaces the whole field; nothing is merged with the default.
-    {"url":"http://a"} leaves timeout zero even when the default had one.
-  - Member names match exactly, and unknown or duplicate members are errors,
-    unless a field's JSON tag says otherwise: case:ignore matches a name in any
-    case, and an embed map collects members no field names, whatever they are.
+    [{"url":"http://a"}] leaves timeout zero even when the default had one.
+  - Member names match exactly, and duplicate members are errors. Unknown members are rejected unless collected
+    by an inline fallback map. A JSON tag with case:ignore enables
+    case-insensitive matching for that field.
   - Only json:"-" ignores a field; json:"-," and json:"-,omitempty" name it "-".
   - null clears a pointer, slice or map and is an error elsewhere. [] and {} are
     empty collections. An empty variable is an error.
@@ -175,16 +213,17 @@ as nil. omitzero keeps an empty non-nil collection.
  6. Variables under a registered prefix that no field reads are reported.
  7. The environment is applied and Validate runs, for each config.
 
-Everything found is joined into one error, one problem per line, ordered by
-instance name and prefix rather than by the order of Add calls:
+Problems are joined into one error. Config registrations are processed in a
+deterministic order rather than the order of Register calls; unknown variables
+are sorted by name. Errors from different stages retain their stage order:
 
 	unknown configuration variable "STORE_HSOT" (did you mean "STORE_HOST"?)
 	config "store": required variable "STORE_HOST" is not set
 
 Values are handed out only when the whole set loaded; see [Handle.Value]. Load
 runs once. A [Loader] is safe for concurrent use and holds no lock while
-ConfigName, SetDefaults, Validate, unmarshalers or the dump writer run; those may
-call Add or Value on the same Loader but must not call its Load.
+SetDefaults, Validate, unmarshalers or the dump writer run; those may
+call Register on that Loader or Value on its handles, but must not call its Load.
 
 # Environment and testing
 
@@ -192,15 +231,67 @@ Load reads one snapshot of the environment, shared by loading, the check for
 unknown variables and the dump. By default it is the process environment;
 [WithEnv] replaces it with a map, which suits tests:
 
-	cfg, err := confmaker.Load[Config](confmaker.WithEnv(map[string]string{
+	cfg, err := confmaker.Load[Config]("store", confmaker.WithEnv(map[string]string{
 		"STORE_HOST": "localhost",
 	}))
 
 confmaker reads variables only; reading a file into such a map is left to the
-caller. [AllowUnknown] exempts prefixes from the check for unknown variables, for
+caller. Passing nil to WithEnv means an empty environment, not a fallback to
+the process. WithEnv copies the map when the option is created.
+[AllowUnknown] exempts prefixes from the check for unknown variables, for
 an environment shared with other programs.
 
+# Structured errors
+
+[ConfigError] exposes an [ErrorKind], InstanceName, VariableName and FieldPath.
+Context is empty when unavailable. errors.As finds the first structured problem;
+[ConfigErrors] walks wrappers and joins to collect all problems in tree order.
+Each ConfigError counts as one problem, including a Validate error whose cause
+is itself a join. Its original cause remains reachable through errors.Is and
+errors.As. Returned pointers should be treated as read-only.
+
+Standard scalar parsers retain their original causes without changing the
+human-readable message. Bool, integer and float errors expose strconv.NumError
+and its syntax or range cause. Duration errors retain the time parser's cause.
+
+Secret parse causes are discarded rather than exposed through Unwrap. Context
+fields do not contain ENV values, but ordinary error messages and user Validate
+errors may contain them. Writer and lifecycle errors remain separate; always
+handle the original error even when ConfigErrors returns no problems.
+
 # Manifest, dump and secrets
+
+[Loader.Manifest] describes a snapshot of all registrations as []ConfigManifest,
+ordered by instance name, with variables in declaration order. It checks invalid
+registrations and conflicts before invoking config methods. Any declaration,
+conflict or rendering error returns a nil result. Load options, including WithEnv and WithDump, are ignored.
+
+	configs, err := loader.Manifest()
+
+It can run before, during or after Load, without reading ENV, calling Validate,
+writing a dump or changing loader state. Each call evaluates defaults on fresh
+instances and never reads loaded values. Registrations completed after the
+snapshot are included on the next call. If called concurrently with Load or
+another Manifest, user-supplied defaults and marshalers must support concurrent
+calls. No loader lock is held while those methods run.
+
+[Loader.WriteEnvExample] writes a reference .env.example to an io.Writer using
+that same manifest. The envDescription tag supplies [Variable.Description] and
+comments in the template. Safe non-zero scalar defaults become assignments;
+secrets, complex values and defaults requiring quoting become commented
+placeholders. Zero defaults are indistinguishable from absent defaults. Names
+unsuitable for dotenv assignments are preserved in quoted comments. This does
+not impose additional restrictions on names accepted by Load. The caller owns
+file handling; no dotenv file is read automatically. Manifest errors write
+nothing; writer errors may leave partial output.
+
+[Loader.WriteManifestJSON] exports a versioned JSON document with fixed
+camelCase keys, preserving all variable metadata except secret defaults.
+[Loader.WriteManifestMarkdown] exports sections and tables for documentation,
+escaping text and distinguishing required from required non-empty variables.
+Both use the same Manifest lifecycle and ordering, finish preparation before
+writing and leave file handling to the caller. Writer failures can leave partial
+output. JSON's hasDefault retains the non-zero semantics described below.
 
 [Manifest] and [WithDump] describe the same variables for different purposes:
 
@@ -211,7 +302,11 @@ an environment shared with other programs.
     default and its source. It is an input report, not proof that loading
     succeeded. Control characters are escaped.
 
-A default that the field's separators could not carry back is an error.
+Manifest and all exporters are strict: if any default cannot be rendered,
+the whole description fails. This includes nil pointers anywhere in a plain
+collection element or a default that its separators cannot represent. A
+commented .env.example placeholder does not bypass that check. Ordinary loading
+without WithDump does not require defaults to be rendered.
 [Variable.HasDefault] reports a non-zero default and cannot tell an explicit
 false, 0 or "" from no default. Manifest values are ENV text; a generator escapes
 them for shell or YAML itself.

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 
 	"github.com/uchaloop/secret/v2"
 )
@@ -17,14 +18,16 @@ var secretValueType = reflect.TypeFor[secret.Value]()
 type Variable struct {
 	// Name is the full variable name, prefix included.
 	Name string
+	// Description is the optional envDescription tag on the field.
+	Description string
 	// Type is the Go type of the field it fills.
 	Type string
 	// Required reports whether the variable must be set: the field is declared
 	// required or notEmpty.
 	Required bool
 	// NotEmpty reports whether the variable must also hold a non-empty value: the
-	// field is declared notEmpty. A required field accepts X= as a deliberate
-	// empty value.
+	// field is declared notEmpty. Without it, required permits empty text,
+	// provided the field type can parse it.
 	NotEmpty bool
 	// Secret reports whether the field holds a secret value.
 	Secret bool
@@ -33,14 +36,83 @@ type Variable struct {
 	Default string
 	// HasDefault reports whether the field is non-zero before the environment is
 	// applied. A default of false, 0 or "" is indistinguishable from no default
-	// and is reported as false.
+	// and is reported as false. Secret fields always report false.
 	HasDefault bool
+
+	complexDefault bool
+}
+
+// ConfigManifest describes one registered configuration and its environment
+// variables. It contains defaults, not values read from the environment.
+type ConfigManifest struct {
+	// InstanceName is the name passed to Loader.Register.
+	InstanceName string
+	// Prefix is the resolved ENV prefix, including any WithPrefix override.
+	Prefix string
+	// Variables lists fields in declaration order. Secret defaults are omitted.
+	Variables []Variable
+}
+
+// Manifest describes a snapshot of all registrations, ordered by instance name.
+// Each config's variables retain declaration order. Invalid registrations and
+// conflicts are reported before any config methods run. Rendering errors are
+// collected across configs; any error returns a nil result, never a partial list.
+//
+// Manifest does not read ENV, call Validate, write a dump or change loader state.
+// EnvOption settings, including their errors, apply only to Load and are ignored
+// here. Each call runs SetDefaults and default marshalers on fresh instances;
+// it never inspects or changes loaded values or makes a Handle ready.
+//
+// Manifest can run before, during or after Load, including after a failed load.
+// Concurrent registrations completed after the snapshot belong to a later call.
+// No loader lock is held while config methods run. These methods must be safe
+// for concurrent calls if Manifest or Load are called concurrently. As with the
+// package-level Manifest, a panic from user code propagates to the caller.
+func (l *Loader) Manifest() ([]ConfigManifest, error) {
+	l.mu.Lock()
+	registrations := slices.Clone(l.registrations)
+	l.mu.Unlock()
+
+	sortRegistrations(registrations)
+	var errs []error
+	descriptors := make([]descriptor, 0, len(registrations))
+	for _, registration := range registrations {
+		if registration.err != nil {
+			errs = append(errs, registration.err)
+			continue
+		}
+		descriptors = append(descriptors, registration.descriptor)
+	}
+	if _, err := checkRegistrations(descriptors); err != nil {
+		errs = append(errs, err)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+
+	manifest := make([]ConfigManifest, 0, len(descriptors))
+	for _, config := range descriptors {
+		variables, err := manifestVariables(config)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		manifest = append(manifest, ConfigManifest{
+			InstanceName: config.instanceName,
+			Prefix:       config.prefix,
+			Variables:    variables,
+		})
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	return manifest, nil
 }
 
 // Manifest returns the variables a config of type T reads, in declaration order,
 // for generating a .env.example, a config map or a documentation table. The
-// options are those of [Loader.Add], so WithName and WithPrefix give the same
-// names as a registration with the same options.
+// required name and options match [Loader.Register], so the same arguments
+// describe the same environment variables.
 //
 // Manifest does not read the environment. It does call T's SetDefaults, and
 // renders each default with MarshalText or the field's plain syntax; a default
@@ -49,50 +121,51 @@ type Variable struct {
 //
 // A declaration [Loader.Load] would refuse is refused here too, before
 // SetDefaults runs.
-func Manifest[T any](opts ...ConfigOption) ([]Variable, error) {
-	set, err := resolveSettings[T](opts)
+func Manifest[T any](name string, opts ...ConfigOption) ([]Variable, error) {
+	config, err := makeDescriptor[T](name, opts)
 	if err != nil {
 		return nil, err
 	}
+	return manifestVariables(config)
+}
 
-	// The schema is checked before SetDefaults runs: an invalid declaration
-	// fails without calling user code.
-	fields, err := compileSchema(reflect.TypeFor[T](), set.prefix)
+// manifestVariables renders an independent instance using the same schema as Load.
+func manifestVariables(config descriptor) ([]Variable, error) {
+	variables, err := describeFields(reflect.ValueOf(config.defaults()).Elem(), config.fields)
 	if err != nil {
-		return nil, makeConfigError(set.name, err)
+		return nil, wrapConfigError(config.instanceName, err)
 	}
-
-	var cfg T
-	setDefaults(&cfg)
-
-	variables, err := describeFields(reflect.ValueOf(&cfg).Elem(), fields)
-	if err != nil {
-		return nil, makeConfigError(set.name, err)
-	}
-
 	return variables, nil
 }
 
 // describeFields renders defaults only for consumers that need a manifest.
-// Loading a config never calls a user-supplied text marshaler.
+// Loading without a dump never calls a user-supplied text marshaler.
 func describeFields(root reflect.Value, fields []fieldSpec) ([]Variable, error) {
 	variables := make([]Variable, len(fields))
 	var errs []error
-	for i, b := range fields {
-		v := Variable{Name: b.Name, Type: b.Type, Required: b.Required, NotEmpty: b.NotEmpty, Secret: b.Secret}
-		if !v.Secret {
-			target := root.FieldByIndex(b.index)
+	for i, field := range fields {
+		variable := Variable{Name: field.Name, Type: field.Type, Description: field.Description, Required: field.Required, NotEmpty: field.NotEmpty, Secret: field.Secret}
+		if !variable.Secret {
+			target := root.FieldByIndex(field.index)
 			var err error
-			v.Default, err = b.render(target)
+			variable.Default, err = field.render(target)
 			if err != nil {
-				errs = append(errs, fmt.Errorf("field %s (variable %q): cannot render default: %w", b.field, b.Name, err))
+				errs = append(errs, makeConfigError(ErrorDefaultRender, field.Name, field.field, fmt.Errorf("field %s (variable %q): cannot render default: %w", field.field, field.Name, err)))
 				continue
 			}
 
-			v.HasDefault = !target.IsZero()
+			variable.HasDefault = !target.IsZero()
+			defaultType := target.Type()
+			for defaultType.Kind() == reflect.Pointer {
+				defaultType = defaultType.Elem()
+			}
+			switch defaultType.Kind() {
+			case reflect.Struct, reflect.Slice, reflect.Array, reflect.Map:
+				variable.complexDefault = true
+			}
 		}
 
-		variables[i] = v
+		variables[i] = variable
 	}
 
 	if err := errors.Join(errs...); err != nil {

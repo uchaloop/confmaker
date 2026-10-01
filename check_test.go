@@ -28,12 +28,12 @@ func (c *strictConfig) SetDefaults() {
 
 // loadStrict loads the strictConfig instance "confxpostgres" from env.
 func loadStrict(env map[string]string, opts ...EnvOption) error {
-	loadOpts := []LoadOption{WithName("confxpostgres"), WithEnv(env)}
+	loadOpts := []LoadOption{WithEnv(env)}
 	for _, opt := range opts {
 		loadOpts = append(loadOpts, opt)
 	}
 
-	_, err := Load[strictConfig](loadOpts...)
+	_, err := Load[strictConfig]("confxpostgres", loadOpts...)
 
 	return err
 }
@@ -114,8 +114,8 @@ func TestCheckCoversEveryInstance(t *testing.T) {
 	}
 
 	loader := MakeLoader(WithEnv(env))
-	loader.Add[strictConfig](WithName("confxmain"))
-	loader.Add[strictConfig](WithName("confxreplica"))
+	loader.Register[strictConfig]("confxmain")
+	loader.Register[strictConfig]("confxreplica")
 	err := loader.Load()
 	if err == nil || !strings.Contains(err.Error(), "CONFXREPLICA_PROT") {
 		t.Fatalf("a named instance was not covered by the check: %v", err)
@@ -129,7 +129,7 @@ func TestInstanceWithoutPrefixIsRefused(t *testing.T) {
 	// instance with no prefix would claim the whole environment and is refused
 	// where it is declared.
 	loader := MakeLoader(WithEnv(nil))
-	loader.Add[strictConfig](WithName("confxpostgres"), WithPrefix(""))
+	loader.Register[strictConfig]("confxpostgres", WithPrefix(""))
 	err := loader.Load()
 	if err == nil {
 		t.Fatal("an instance with no prefix was accepted")
@@ -152,8 +152,8 @@ func TestNestedPrefixesDoNotCollide(t *testing.T) {
 	// must not be reported as unknown for the shorter one.
 
 	loader := MakeLoader(WithEnv(env))
-	loader.Add[outer](WithName("confxapi"))
-	loader.Add[outer](WithName("confxapi_status"))
+	loader.Register[outer]("confxapi")
+	loader.Register[outer]("confxapi_status")
 	err := loader.Load()
 	if err != nil {
 		t.Fatalf("overlapping prefixes reported a false positive: %v", err)
@@ -170,7 +170,7 @@ func TestWithDumpListsVariablesAndMasksSecrets(t *testing.T) {
 
 	var out bytes.Buffer
 
-	_, err := Load[strictConfig](WithDump(&out), WithEnv(env), WithName("confxpostgres"))
+	_, err := Load[strictConfig]("confxpostgres", WithDump(&out), WithEnv(env))
 	if err != nil {
 		t.Fatalf("app: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestNonStructConfigIsNotBlamedOnTheEnvironment(t *testing.T) {
 	// A pointer T is a mistake in the code, not in the environment. The check
 	// must not bury the parser's own report under a list of "unknown" variables.
 	loader := MakeLoader(WithEnv(env))
-	loader.Add[*strictConfig](WithName("confxthing"))
+	loader.Register[*strictConfig]("confxthing")
 	err := loader.Load()
 	if err == nil {
 		t.Fatal("expected a pointer config to fail")
@@ -261,7 +261,7 @@ func TestUnreadableConfigIsReported(t *testing.T) {
 	// A collection of structs would read variables no type can enumerate, so the
 	// declaration is refused instead of quietly leaving a hole in the check.
 	loader := MakeLoader(WithEnv(nil))
-	loader.Add[config](WithName("confxcluster"))
+	loader.Register[config]("confxcluster")
 	err := loader.Load()
 	if err == nil || !strings.Contains(err.Error(), "nest by value") {
 		t.Fatalf("unexpected error: %v", err)
@@ -282,8 +282,8 @@ func TestTwoInstancesMayNotClaimOneVariable(t *testing.T) {
 	}
 
 	_, err := checkRegistrations([]descriptor{
-		{label: "db", prefix: "CONFXDB_", fields: mustDescribe[outer](t, "CONFXDB_")},
-		{label: "db_main", prefix: "CONFXDB_MAIN_", fields: mustDescribe[inner](t, "CONFXDB_MAIN_")},
+		{instanceName: "db", prefix: "CONFXDB_", fields: mustDescribe[outer](t, "CONFXDB_")},
+		{instanceName: "db_main", prefix: "CONFXDB_MAIN_", fields: mustDescribe[inner](t, "CONFXDB_MAIN_")},
 	})
 
 	if err == nil {
@@ -305,8 +305,8 @@ func TestDistinctInstancesAreNotACollision(t *testing.T) {
 	}
 
 	_, err := checkRegistrations([]descriptor{
-		{label: "primary", prefix: "CONFXPRIMARY_", fields: mustDescribe[config](t, "CONFXPRIMARY_")},
-		{label: "replica", prefix: "CONFXREPLICA_", fields: mustDescribe[config](t, "CONFXREPLICA_")},
+		{instanceName: "primary", prefix: "CONFXPRIMARY_", fields: mustDescribe[config](t, "CONFXPRIMARY_")},
+		{instanceName: "replica", prefix: "CONFXREPLICA_", fields: mustDescribe[config](t, "CONFXREPLICA_")},
 	})
 	if err != nil {
 		t.Fatalf("two instances of one type were refused: %v", err)

@@ -47,7 +47,7 @@ func BenchmarkManifest(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := Manifest[benchConfig](WithName("confxbench")); err != nil {
+		if _, err := Manifest[benchConfig]("confxbench"); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -84,7 +84,7 @@ func BenchmarkLoadOne(b *testing.B) {
 							setDefaults(&cfg)
 							err = applyAndValidate(&cfg, fields, "confxbench", env)
 						} else {
-							cfg, err = Load[benchConfig](WithName("confxbench"), WithEnv(env))
+							cfg, err = Load[benchConfig]("confxbench", WithEnv(env))
 						}
 
 						if scenario == "missing-required" {
@@ -115,7 +115,7 @@ func addBenchEnv(env map[string]string, prefix string) {
 }
 
 // BenchmarkLoader measures six populated instances in one Loader, the handful a
-// service builds at startup. "register" is MakeLoader and the Add calls alone:
+// service builds at startup. "register" is MakeLoader and the Register calls alone:
 // resolving names and compiling schemas. "register+load" adds the environment
 // snapshot, the unknown-variable check and every load; confx's
 // BenchmarkModuleStart runs the same configs and environment inside an Fx
@@ -133,7 +133,7 @@ func BenchmarkLoader(b *testing.B) {
 	register := func() *Loader {
 		loader := MakeLoader(WithEnv(env))
 		for _, name := range names {
-			loader.Add[benchConfig](WithName(name))
+			loader.Register[benchConfig](name)
 		}
 
 		return loader

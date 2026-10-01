@@ -10,7 +10,7 @@ import (
 // checkRegistrations refuses instances that share a name, a prefix or a variable,
 // and returns every declared variable mapped to the instance that reads it.
 func checkRegistrations(descriptors []descriptor) (map[string]string, error) {
-	if err := checkPrefixesAreDistinct(descriptors); err != nil {
+	if err := checkInstanceNamesAndPrefixes(descriptors); err != nil {
 		return nil, err
 	}
 
@@ -46,7 +46,23 @@ func checkUnknown(descriptors []descriptor, known map[string]string, allowed []s
 
 	errs := make([]error, 0, len(unknown))
 	for _, name := range unknown {
-		errs = append(errs, fmt.Errorf("unknown configuration variable %q%s", name, hint(name, known)))
+		problem := &ConfigError{
+			Kind:         ErrorUnknownVariable,
+			VariableName: name,
+			err:          fmt.Errorf("unknown configuration variable %q%s", name, hint(name, known)),
+		}
+		// Overlapping prefixes do not establish a unique owner for a typo.
+		for _, config := range descriptors {
+			if !strings.HasPrefix(name, config.prefix) {
+				continue
+			}
+			if len(problem.InstanceName) != 0 {
+				problem.InstanceName = ""
+				break
+			}
+			problem.InstanceName = config.instanceName
+		}
+		errs = append(errs, problem)
 	}
 
 	return errors.Join(errs...)
@@ -71,12 +87,12 @@ func claimedVariables(descriptors []descriptor) (map[string]string, error) {
 		for _, variable := range d.fields {
 			switch first, taken := claimed[variable.Name]; {
 			case !taken:
-				claimed[variable.Name] = d.label
+				claimed[variable.Name] = d.instanceName
 			default:
-				errs = append(errs, fmt.Errorf(
+				errs = append(errs, makeConfigError(ErrorConflict, variable.Name, "", fmt.Errorf(
 					"variable %q is read by both %q and %q; provide one config and inject it where both need it",
-					variable.Name, first, d.label,
-				))
+					variable.Name, first, d.instanceName,
+				)))
 			}
 		}
 	}
@@ -84,7 +100,7 @@ func claimedVariables(descriptors []descriptor) (map[string]string, error) {
 	return claimed, errors.Join(errs...)
 }
 
-// checkPrefixesAreDistinct refuses two instances reading one prefix. The scan
+// checkInstanceNamesAndPrefixes rejects duplicate instance names and prefixes. The scan
 // accepts a variable that any instance declares, so instances sharing a prefix
 // would cover for each other's typos: a name meant for one and misspelled into
 // the other's would pass unnoticed.
@@ -92,26 +108,26 @@ func claimedVariables(descriptors []descriptor) (map[string]string, error) {
 // A name reaches its prefix through the separators it uses - read-replica,
 // read_replica and read.replica all read READ_REPLICA_ - so two names that look
 // distinct can arrive at one.
-func checkPrefixesAreDistinct(descriptors []descriptor) error {
+func checkInstanceNamesAndPrefixes(descriptors []descriptor) error {
 	names := make(map[string]struct{}, len(descriptors))
 	owner := make(map[string]string, len(descriptors))
 
 	var errs []error
 
 	for _, d := range descriptors {
-		if _, exists := names[d.label]; exists {
-			errs = append(errs, fmt.Errorf("instance name %q is registered more than once; give each config a distinct name", d.label))
+		if _, exists := names[d.instanceName]; exists {
+			errs = append(errs, &ConfigError{Kind: ErrorConflict, InstanceName: d.instanceName, err: fmt.Errorf("instance name %q is registered more than once; give each config a distinct name", d.instanceName)})
 		}
 
-		names[d.label] = struct{}{}
+		names[d.instanceName] = struct{}{}
 		switch first, taken := owner[d.prefix]; {
 		case !taken:
-			owner[d.prefix] = d.label
+			owner[d.prefix] = d.instanceName
 		default:
-			errs = append(errs, fmt.Errorf(
+			errs = append(errs, makeConfigError(ErrorConflict, "", "", fmt.Errorf(
 				"instances %q and %q both read the prefix %q; one of them cannot be checked for typos",
-				first, d.label, d.prefix,
-			))
+				first, d.instanceName, d.prefix,
+			)))
 		}
 	}
 

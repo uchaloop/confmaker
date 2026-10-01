@@ -28,14 +28,14 @@ func TestValueBeforeLoad(t *testing.T) {
 	t.Parallel()
 
 	loader := MakeLoader(WithEnv(nil))
-	handle := loader.Add[loaderConfig](WithName("confxloader"))
+	handle := loader.Register[loaderConfig]("confxloader")
 
 	if _, err := handle.Value(); !errors.Is(err, ErrNotLoaded) {
 		t.Fatalf("got %v, want ErrNotLoaded", err)
 	}
 }
 
-func TestAddAfterLoad(t *testing.T) {
+func TestRegisterAfterLoad(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
@@ -43,12 +43,12 @@ func TestAddAfterLoad(t *testing.T) {
 	}
 
 	loader := MakeLoader(WithEnv(env))
-	first := loader.Add[loaderConfig](WithName("confxloader"))
+	first := loader.Register[loaderConfig]("confxloader")
 	if err := loader.Load(); err != nil {
 		t.Fatal(err)
 	}
 
-	late := loader.Add[loaderOtherConfig](WithName("confxother"))
+	late := loader.Register[loaderOtherConfig]("confxother")
 	if _, err := late.Value(); !errors.Is(err, ErrRegisteredAfterLoad) {
 		t.Fatalf("got %v, want ErrRegisteredAfterLoad", err)
 	}
@@ -72,8 +72,8 @@ func TestFailedLoadHandsOutNoValues(t *testing.T) {
 	}
 
 	loader := MakeLoader(WithEnv(env))
-	good := loader.Add[loaderConfig](WithName("confxloader"))
-	loader.Add[loaderOtherConfig](WithName("confxother"))
+	good := loader.Register[loaderConfig]("confxloader")
+	loader.Register[loaderOtherConfig]("confxother")
 
 	err := loader.Load()
 	if err == nil {
@@ -93,7 +93,7 @@ func TestLoadRunsOnce(t *testing.T) {
 	loaderDefaultCalls.Store(0)
 
 	loader := MakeLoader()
-	handle := loader.Add[loaderConfig](WithName("confxloader"))
+	handle := loader.Register[loaderConfig]("confxloader")
 	if err := loader.Load(); err != nil {
 		t.Fatal(err)
 	}
@@ -117,12 +117,12 @@ func TestLoaderIsSafeForConcurrentUse(t *testing.T) {
 	}
 
 	loader := MakeLoader(WithEnv(env))
-	handle := loader.Add[loaderConfig](WithName("confxloader"))
+	handle := loader.Register[loaderConfig]("confxloader")
 
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
-			loader.Add[loaderOtherConfig](WithName("confxother"))
+			loader.Register[loaderOtherConfig]("confxother")
 			_ = loader.Load()
 			_, _ = handle.Value()
 		})
@@ -140,10 +140,10 @@ func TestLoadReportsRegistrationsAndEveryConfig(t *testing.T) {
 	}
 
 	loader := MakeLoader(WithEnv(env))
-	loader.Add[loaderConfig](WithName("confxloader"))
-	loader.Add[loaderOtherConfig](WithName("confxother"))
-	loader.Add[loaderOtherConfig]()
-	loader.Add[loaderConfig](WithName("Invalid"))
+	loader.Register[loaderConfig]("confxloader")
+	loader.Register[loaderOtherConfig]("confxother")
+	loader.Register[loaderOtherConfig]("")
+	loader.Register[loaderConfig]("Invalid")
 
 	err := loader.Load()
 	if err == nil {
@@ -151,7 +151,7 @@ func TestLoadReportsRegistrationsAndEveryConfig(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		`config confmaker.loaderOtherConfig has no instance name`,
+		`an instance name is required`,
 		`instance name "Invalid"`,
 		`unknown configuration variable "CONFXLOADER_HSOT" (did you mean "CONFXLOADER_HOST"?)`,
 		`config "confxloader": required variable "CONFXLOADER_HOST" is not set`,
@@ -169,7 +169,7 @@ func TestLoadCallsDefaultsOnceWithDump(t *testing.T) {
 
 	var out bytes.Buffer
 	env := WithEnv(map[string]string{"CONFXLOADER_HOST": "db"})
-	cfg, err := Load[loaderConfig](WithDump(&out), env, WithName("confxloader"))
+	cfg, err := Load[loaderConfig]("confxloader", WithDump(&out), env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,8 +198,8 @@ func TestDumpFailureDoesNotHideTheReport(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			loader := MakeLoader(dump, WithEnv(env))
-			loader.Add[loaderOtherConfig](WithName("confxother"))
-			loader.Add[brokenTextConfig](WithName("confxrender"))
+			loader.Register[loaderOtherConfig]("confxother")
+			loader.Register[brokenTextConfig]("confxrender")
 
 			err := loader.Load()
 			if err == nil {
@@ -224,7 +224,7 @@ func TestDumpIsWrittenWhenLoadFails(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
-	if _, err := Load[loaderConfig](WithDump(&out), WithEnv(nil), WithName("confxloader")); err == nil {
+	if _, err := Load[loaderConfig]("confxloader", WithDump(&out), WithEnv(nil)); err == nil {
 		t.Fatal("expected the load to fail")
 	}
 
@@ -317,12 +317,12 @@ func waitForBlockedLoad(t *testing.T) {
 // Not parallel: the hooks are shared by every callbackConfig.
 func TestUserCodeMayUseTheLoaderWhileItLoads(t *testing.T) {
 	loader := MakeLoader(WithEnv(map[string]string{"CONFXCALLBACK_HOST": "db"}))
-	handle := loader.Add[callbackConfig](WithName("confxcallback"))
+	handle := loader.Register[callbackConfig]("confxcallback")
 
 	var valueErr, lateErr error
 	validate := func() {
 		_, valueErr = handle.Value()
-		_, lateErr = loader.Add[loaderConfig](WithName("confxlate")).Value()
+		_, lateErr = loader.Register[loaderConfig]("confxlate").Value()
 	}
 
 	callbackValidate.Store(&validate)
@@ -335,7 +335,7 @@ func TestUserCodeMayUseTheLoaderWhileItLoads(t *testing.T) {
 	})
 
 	if !errors.Is(valueErr, ErrNotLoaded) || !errors.Is(lateErr, ErrRegisteredAfterLoad) {
-		t.Fatalf("during load: Value %v, late Add %v", valueErr, lateErr)
+		t.Fatalf("during load: Value %v, late Register %v", valueErr, lateErr)
 	}
 
 	if cfg, err := handle.Value(); err != nil || cfg.Host != "db" {
@@ -346,7 +346,7 @@ func TestUserCodeMayUseTheLoaderWhileItLoads(t *testing.T) {
 // Not parallel: the hooks are shared by every callbackConfig.
 func TestConcurrentLoadWaitsForTheResult(t *testing.T) {
 	loader := MakeLoader(WithEnv(map[string]string{"CONFXCALLBACK_HOST": "db"}))
-	loader.Add[callbackConfig](WithName("confxcallback"))
+	loader.Register[callbackConfig]("confxcallback")
 
 	started, release := make(chan struct{}), make(chan struct{})
 	defaults := func() {
@@ -382,7 +382,7 @@ func TestConcurrentLoadWaitsForTheResult(t *testing.T) {
 // Not parallel: the hooks are shared by every callbackConfig.
 func TestPanicDuringLoadFinishesTheLoad(t *testing.T) {
 	loader := MakeLoader(WithEnv(nil))
-	handle := loader.Add[callbackConfig](WithName("confxcallback"))
+	handle := loader.Register[callbackConfig]("confxcallback")
 
 	started, release := make(chan struct{}), make(chan struct{})
 	defaults := func() {
@@ -436,8 +436,8 @@ func TestConflictStopsLoadingBeforeUserCode(t *testing.T) {
 
 	var out bytes.Buffer
 	loader := MakeLoader(WithEnv(nil), WithDump(&out))
-	loader.Add[callbackConfig](WithName("confxsame"))
-	loader.Add[callbackConfig](WithName("confxsame"))
+	loader.Register[callbackConfig]("confxsame")
+	loader.Register[callbackConfig]("confxsame")
 
 	err := loader.Load()
 	if err == nil || !strings.Contains(err.Error(), "registered more than once") {
@@ -457,19 +457,19 @@ func TestAllowUnknownCopiesItsPrefixes(t *testing.T) {
 	prefixes[0] = "CONFXLOADER_"
 
 	env := map[string]string{"CONFXLOADER_HOST": "db", "CONFXLOADER_HSOT": "typo"}
-	_, err := Load[loaderConfig](WithName("confxloader"), WithEnv(env), option)
+	_, err := Load[loaderConfig]("confxloader", WithEnv(env), option)
 	if err == nil || !strings.Contains(err.Error(), "CONFXLOADER_HSOT") {
 		t.Fatalf("a change to the caller's slice reached the option: %v", err)
 	}
 }
 
-type lateNamedConfig struct {
+type lateConfig struct {
 	Host string `env:"HOST"`
 }
 
-func (lateNamedConfig) ConfigName() string { panic("ConfigName ran for a late registration") }
+func (*lateConfig) SetDefaults() { panic("SetDefaults ran for a late registration") }
 
-func TestLateAddRunsNoUserCode(t *testing.T) {
+func TestLateRegisterRunsNoUserCode(t *testing.T) {
 	t.Parallel()
 
 	loader := MakeLoader(WithEnv(nil))
@@ -477,19 +477,19 @@ func TestLateAddRunsNoUserCode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := loader.Add[lateNamedConfig]().Value(); !errors.Is(err, ErrRegisteredAfterLoad) {
+	if _, err := loader.Register[lateConfig]("late").Value(); !errors.Is(err, ErrRegisteredAfterLoad) {
 		t.Fatalf("got %v", err)
 	}
 }
 
-func TestConflictReportDoesNotDependOnAddOrder(t *testing.T) {
+func TestConflictReportDoesNotDependOnRegistrationOrder(t *testing.T) {
 	t.Parallel()
 
 	var reports []string
 	for _, prefixes := range [][]string{{"CONFXA_", "CONFXB_", "CONFXA_", "CONFXB_"}, {"CONFXB_", "CONFXA_", "CONFXB_", "CONFXA_"}} {
 		loader := MakeLoader(WithEnv(nil))
 		for _, prefix := range prefixes {
-			loader.Add[loaderConfig](WithName("confxsame"), WithPrefix(prefix))
+			loader.Register[loaderConfig]("confxsame", WithPrefix(prefix))
 		}
 
 		reports = append(reports, loader.Load().Error())
@@ -504,26 +504,26 @@ func TestInvalidRegistrationDoesNotHideOtherConfigs(t *testing.T) {
 	t.Parallel()
 
 	loader := MakeLoader(WithEnv(nil))
-	loader.Add[loaderConfig]()
-	loader.Add[loaderOtherConfig](WithName("confxother"))
+	loader.Register[loaderConfig]("")
+	loader.Register[loaderOtherConfig]("confxother")
 
 	err := loader.Load()
-	for _, want := range []string{"has no instance name", `required variable "CONFXOTHER_PORT" is not set`} {
+	for _, want := range []string{"an instance name is required", `required variable "CONFXOTHER_PORT" is not set`} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("report misses %q: %v", want, err)
 		}
 	}
 }
 
-func TestReportDoesNotDependOnAddOrder(t *testing.T) {
+func TestReportDoesNotDependOnRegistrationOrder(t *testing.T) {
 	t.Parallel()
 
 	adds := []func(*Loader){
-		func(l *Loader) { l.Add[loaderOtherConfig]() },
-		func(l *Loader) { l.Add[loaderConfig]() },
-		func(l *Loader) { l.Add[loaderConfig](WithName("Invalid")) },
-		func(l *Loader) { l.Add[loaderConfig](nil) },
-		func(l *Loader) { l.Add[loaderOtherConfig](WithName("confxother")) },
+		func(l *Loader) { l.Register[loaderOtherConfig]("") },
+		func(l *Loader) { l.Register[loaderConfig]("") },
+		func(l *Loader) { l.Register[loaderConfig]("Invalid") },
+		func(l *Loader) { l.Register[loaderConfig]("app", nil) },
+		func(l *Loader) { l.Register[loaderOtherConfig]("confxother") },
 	}
 
 	var reports []string
@@ -543,7 +543,7 @@ func TestReportDoesNotDependOnAddOrder(t *testing.T) {
 	}
 }
 
-func TestDumpDoesNotDependOnAddOrder(t *testing.T) {
+func TestDumpDoesNotDependOnRegistrationOrder(t *testing.T) {
 	t.Parallel()
 
 	env := WithEnv(map[string]string{"CONFXLOADER_HOST": "db", "CONFXOTHER_PORT": "5432"})
@@ -553,8 +553,8 @@ func TestDumpDoesNotDependOnAddOrder(t *testing.T) {
 		var out bytes.Buffer
 		loader := MakeLoader(env, WithDump(&out))
 		adds := []func(){
-			func() { loader.Add[loaderConfig](WithName("confxloader")) },
-			func() { loader.Add[loaderOtherConfig](WithName("confxother")) },
+			func() { loader.Register[loaderConfig]("confxloader") },
+			func() { loader.Register[loaderOtherConfig]("confxother") },
 		}
 
 		if reversed {
@@ -583,5 +583,26 @@ func TestZeroHandle(t *testing.T) {
 	var handle Handle[loaderConfig]
 	if _, err := handle.Value(); err == nil || !strings.Contains(err.Error(), "belongs to no loader") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestCopiedHandleSharesTypedResult(t *testing.T) {
+	type config struct {
+		Host string `env:"HOST"`
+	}
+	loader := MakeLoader(WithEnv(map[string]string{"APP_HOST": "database"}))
+	handle := loader.Register[config]("app")
+	copied := *handle
+	if _, err := copied.Value(); !errors.Is(err, ErrNotLoaded) {
+		t.Fatalf("before Load: %v", err)
+	}
+	if err := loader.Load(); err != nil {
+		t.Fatal(err)
+	}
+	for _, result := range []*Handle[config]{handle, &copied} {
+		value, err := result.Value()
+		if err != nil || value.Host != "database" {
+			t.Fatalf("after Load: %+v, %v", value, err)
+		}
 	}
 }

@@ -32,7 +32,7 @@ func (c *manifestConfig) SetDefaults() {
 func manifested[T any](t *testing.T, name string, opts ...ConfigOption) []Variable {
 	t.Helper()
 
-	variables, err := Manifest[T](append([]ConfigOption{WithName(name)}, opts...)...)
+	variables, err := Manifest[T](name, opts...)
 	if err != nil {
 		t.Fatalf("manifest: %v", err)
 	}
@@ -45,7 +45,7 @@ func manifested[T any](t *testing.T, name string, opts ...ConfigOption) []Variab
 func bindError[T any](t *testing.T) error {
 	t.Helper()
 
-	if _, err := compileSchema(reflect.TypeFor[T](), "CONFXAPP_"); err != nil {
+	if _, _, err := prepareConfig[T]("confxapp", nil); err != nil {
 		return err
 	}
 
@@ -154,7 +154,7 @@ func TestManifestMatchesTheStrictCheck(t *testing.T) {
 	env["CONFXPOSTGRES_HOST"] = "db:5432"
 	env["CONFXPOSTGRES_TIMEOUT"] = "1s"
 
-	if _, err := Load[manifestConfig](WithEnv(env), WithName("confxpostgres")); err != nil {
+	if _, err := Load[manifestConfig]("confxpostgres", WithEnv(env)); err != nil {
 		t.Fatalf("a variable the manifest lists was rejected by Load: %v", err)
 	}
 }

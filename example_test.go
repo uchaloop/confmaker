@@ -15,8 +15,6 @@ type StoreConfig struct {
 	Timeout time.Duration `env:"TIMEOUT"`
 }
 
-func (StoreConfig) ConfigName() string { return "store" }
-
 func (c *StoreConfig) SetDefaults() { c.Timeout = 30 * time.Second }
 
 func (c StoreConfig) Validate() error {
@@ -30,7 +28,7 @@ func (c StoreConfig) Validate() error {
 // Load reads one config. WithEnv stands in for the process environment here, so
 // the example runs the same everywhere; an application calls Load without it.
 func ExampleLoad() {
-	cfg, err := confmaker.Load[StoreConfig](confmaker.WithEnv(map[string]string{
+	cfg, err := confmaker.Load[StoreConfig]("store", confmaker.WithEnv(map[string]string{
 		"STORE_HOST": "db:5432",
 	}))
 	if err != nil {
@@ -48,7 +46,7 @@ func ExampleLoad() {
 // Validate would refuse the zero timeout, but it does not run while a variable of
 // the config is missing: its report comes once the host is fixed.
 func ExampleLoad_errors() {
-	_, err := confmaker.Load[StoreConfig](confmaker.WithEnv(map[string]string{
+	_, err := confmaker.Load[StoreConfig]("store", confmaker.WithEnv(map[string]string{
 		"STORE_HSOT":    "db:5432",
 		"STORE_TIMEOUT": "0s",
 	}))
@@ -68,8 +66,8 @@ func ExampleLoader() {
 		"REPLICA_HOST": "replica:5432",
 	}))
 
-	primary := loader.Add[StoreConfig]()                              // STORE_*
-	replica := loader.Add[StoreConfig](confmaker.WithName("replica")) // REPLICA_*
+	primary := loader.Register[StoreConfig]("store")   // STORE_*
+	replica := loader.Register[StoreConfig]("replica") // REPLICA_*
 
 	if err := loader.Load(); err != nil {
 		fmt.Println(err)
@@ -87,7 +85,7 @@ func ExampleLoader() {
 // Manifest lists the variables and their defaults without reading the
 // environment. The output is ENV names and values, not an escaped shell script.
 func ExampleManifest() {
-	variables, err := confmaker.Manifest[StoreConfig]()
+	variables, err := confmaker.Manifest[StoreConfig]("store")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -104,10 +102,7 @@ func ExampleManifest() {
 
 // WithDump prints each variable, its value and where it came from.
 func ExampleWithDump() {
-	_, err := confmaker.Load[StoreConfig](
-		confmaker.WithDump(os.Stdout),
-		confmaker.WithEnv(map[string]string{"STORE_HOST": "db:5432"}),
-	)
+	_, err := confmaker.Load[StoreConfig]("store", confmaker.WithDump(os.Stdout), confmaker.WithEnv(map[string]string{"STORE_HOST": "db:5432"}))
 
 	fmt.Println(err)
 
@@ -116,4 +111,52 @@ func ExampleWithDump() {
 	// store     STORE_HOST     string         db:5432  env
 	// store     STORE_TIMEOUT  time.Duration  30s      default
 	// <nil>
+}
+
+// The instance name stays primary while WithPrefix selects DATABASE_* variables.
+func ExampleWithPrefix() {
+	cfg, err := confmaker.Load[StoreConfig]("primary",
+		confmaker.WithPrefix("DATABASE_"),
+		confmaker.WithEnv(map[string]string{"DATABASE_HOST": "db:5432"}),
+	)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	variables, err := confmaker.Manifest[StoreConfig]("primary", confmaker.WithPrefix("DATABASE_"))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(cfg.Host, variables[0].Name)
+
+	// Output:
+	// db:5432 DATABASE_HOST
+}
+
+// Manifest describes the registered set without reading required ENV values.
+func ExampleLoader_Manifest() {
+	loader := confmaker.MakeLoader()
+	loader.Register[StoreConfig]("store")
+	loader.Register[StoreConfig]("replica", confmaker.WithPrefix("REPLICA_STORE_"))
+
+	configs, err := loader.Manifest()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	for _, config := range configs {
+		fmt.Println(config.InstanceName, config.Prefix)
+		for _, variable := range config.Variables {
+			fmt.Printf("%s=%s\n", variable.Name, variable.Default)
+		}
+	}
+
+	// Output:
+	// replica REPLICA_STORE_
+	// REPLICA_STORE_HOST=
+	// REPLICA_STORE_TIMEOUT=30s
+	// store STORE_
+	// STORE_HOST=
+	// STORE_TIMEOUT=30s
 }

@@ -27,12 +27,12 @@ func (displayInt) String() string { return "display only" }
 func TestLoadDoesNotRenderDefaults(t *testing.T) {
 	t.Parallel()
 
-	_, err := Load[brokenTextConfig](WithName("confxrender"), WithEnv(nil))
+	_, err := Load[brokenTextConfig]("confxrender", WithEnv(nil))
 	if err != nil {
 		t.Fatalf("load invoked marshaler: %v", err)
 	}
 
-	_, err = Manifest[brokenTextConfig](WithName("confxrender"))
+	_, err = Manifest[brokenTextConfig]("confxrender")
 	if !errors.Is(err, errMarshalDefault) || !strings.Contains(err.Error(), "CONFXRENDER_VALUE") {
 		t.Fatalf("lost marshal error or field context: %v", err)
 	}
@@ -131,7 +131,7 @@ type ambiguousDefaults struct {
 
 func (c *ambiguousDefaults) SetDefaults() { c.Items = []string{"a,b"} }
 func TestManifestRejectsAmbiguousDefaultWithContext(t *testing.T) {
-	_, err := Manifest[ambiguousDefaults](WithName("confxrender"))
+	_, err := Manifest[ambiguousDefaults]("confxrender")
 	if err == nil || !strings.Contains(err.Error(), "field Items") || !strings.Contains(err.Error(), "CONFXRENDER_ITEMS") {
 		t.Fatalf("missing context: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestDumpEscapesControlsAndMasksSecrets(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err := writeDump(&out, []dumpSection{{label: "dump", variables: []Variable{
+	err := writeDump(&out, []dumpSection{{instanceName: "dump", variables: []Variable{
 		{Name: "CONFXDUMP_VALUE", Type: "string"},
 		{Name: "CONFXDUMP_SECRET", Type: "secret.Secret", Secret: true},
 	}}}, env)
@@ -178,7 +178,7 @@ func TestManifestRequiresEncoderForCustomDecoder(t *testing.T) {
 		Value countedByte `env:"VALUE"`
 	}
 
-	if _, err := Manifest[cfg](WithName("confxrender")); err == nil || !strings.Contains(err.Error(), "TextMarshaler") {
+	if _, err := Manifest[cfg]("confxrender"); err == nil || !strings.Contains(err.Error(), "TextMarshaler") {
 		t.Fatalf("missing encoder: %v", err)
 	}
 }
@@ -201,7 +201,7 @@ func TestManifestAggregatesMarshalErrors(t *testing.T) {
 		Second brokenText `env:"SECOND"`
 	}
 
-	_, err := Manifest[cfg](WithName("confxrender"))
+	_, err := Manifest[cfg]("confxrender")
 	if err == nil || !errors.Is(err, errMarshalDefault) || !strings.Contains(err.Error(), "field First") || !strings.Contains(err.Error(), "field Second") {
 		t.Fatalf("marshal errors not aggregated: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestDumpReportsWhereAValueComesFrom(t *testing.T) {
 	var out bytes.Buffer
 
 	// Host is required and unset, Timeout has a default, Spare has neither.
-	if _, err := Load[config](WithDump(&out), WithEnv(nil), WithName("confxapp")); err == nil {
+	if _, err := Load[config]("confxapp", WithDump(&out), WithEnv(nil)); err == nil {
 		t.Fatal("expected the required variable to fail the load")
 	}
 
@@ -277,6 +277,102 @@ func TestDumpReportsWhereAValueComesFrom(t *testing.T) {
 	for _, want := range []string{"required", "zero value"} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("dump is missing the %q source:\n%s", want, dump)
+		}
+	}
+}
+
+func TestCollectionDefaultsRejectNestedNilPointers(t *testing.T) {
+	var inner *string
+	middle := &inner
+	outer := &middle
+	for name, value := range map[string]any{
+		"slice double": []**string{middle, middle},
+		"slice triple": []***string{outer, outer},
+		"map key":      map[**string]string{middle: "value"},
+		"map value":    map[string]***string{"key": outer},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := renderValue(reflect.ValueOf(value), ",", ":")
+			if err == nil || !strings.Contains(err.Error(), "nil pointer") {
+				t.Fatalf("expected unrepresentable nil pointer, got %v", err)
+			}
+		})
+	}
+}
+
+type nestedNilDefaultConfig struct {
+	Items  []**string          `env:"ITEMS"`
+	Values map[string]**string `env:"VALUES"`
+}
+
+func (c *nestedNilDefaultConfig) SetDefaults() {
+	var inner *string
+	c.Items = []**string{&inner, &inner}
+	c.Values = map[string]**string{"key": &inner}
+}
+
+func TestNestedNilDefaultsLoadButCannotBeDescribed(t *testing.T) {
+	cfg, err := Load[nestedNilDefaultConfig]("app", WithEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Items) != 2 || cfg.Items[0] == nil || *cfg.Items[0] != nil || cfg.Values["key"] == nil || *cfg.Values["key"] != nil {
+		t.Fatal("loading changed nested nil defaults")
+	}
+	variables, err := Manifest[nestedNilDefaultConfig]("app")
+	problems := ConfigErrors(err)
+	if variables != nil || len(problems) != 2 {
+		t.Fatalf("manifest: %v, %v", variables, err)
+	}
+	for _, problem := range problems {
+		if problem.Kind != ErrorDefaultRender || problem.InstanceName != "app" {
+			t.Fatalf("context: %#v", problem)
+		}
+	}
+	loader := MakeLoader(WithEnv(nil))
+	loader.Register[nestedNilDefaultConfig]("app")
+	for name, write := range map[string]func(*bytes.Buffer) error{
+		"env":      func(b *bytes.Buffer) error { return loader.WriteEnvExample(b) },
+		"json":     func(b *bytes.Buffer) error { return loader.WriteManifestJSON(b) },
+		"markdown": func(b *bytes.Buffer) error { return loader.WriteManifestMarkdown(b) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var output bytes.Buffer
+			if err := write(&output); err == nil || output.Len() != 0 {
+				t.Fatalf("export: %v, %q", err, &output)
+			}
+		})
+	}
+	if err := loader.Load(); err != nil {
+		t.Fatalf("export failure affected loading: %v", err)
+	}
+}
+
+func TestCollectionDefaultsWithNonNilPointerChainsRoundTrip(t *testing.T) {
+	value := "hello"
+	inner := &value
+	middle := &inner
+	outer := &middle
+	original := struct {
+		Items  []***string          `env:"ITEMS"`
+		Values map[string]***string `env:"VALUES"`
+	}{[]***string{outer}, map[string]***string{"key": outer}}
+	for _, collection := range []any{original.Items, original.Values} {
+		source := reflect.ValueOf(collection)
+		raw, err := renderValue(source, ",", ":")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parse, err := fieldParser(source.Type(), ",", ":")
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := reflect.New(source.Type()).Elem()
+		if err := parse(target, raw); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(collection, target.Interface()) {
+			t.Fatalf("round-trip changed %v", collection)
 		}
 	}
 }

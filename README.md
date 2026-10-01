@@ -4,295 +4,370 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/uchaloop/confmaker.svg)](https://pkg.go.dev/github.com/uchaloop/confmaker) [![CI](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/tag/uchaloop/confmaker?label=release)](https://github.com/uchaloop/confmaker/tags) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[Install](#installation) · [Quick start](#quick-start) · [How it works](#how-loading-works) · [Configuration](#configuration-rules) · [Examples](#testing)
+**Explicit, centralized configuration for Go applications.** Packages declare
+what they need; the application registers their configs, loads ENV once and
+passes typed values to consumers. The core works independently of any framework;
+[confx](https://github.com/uchaloop/confx) adapts it to Uber Fx.
 
-Typed configuration for Go, read from the environment and nowhere else
-([12factor III](https://12factor.net/config)). A library declares its config as a
-plain struct with env tags; the application loads it, and confmaker fills it,
-checks the environment for typos and validates the result.
-
-- **Defaults in code**, in `SetDefaults`, where tests and callers see them.
-- **One report**: every problem of every config in one error, with suggestions
-  for misspelled variables.
-- **A manifest** of every variable, for a `.env.example` or a config map.
-- **No framework required**; an [Fx adapter](https://github.com/uchaloop/confx) is a separate module.
+[Install](#installation) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Rules](#configuration-rules) · [Manifest](#manifest-and-configuration-documentation) · [Reference](#reference)
 
 ## Installation
 
-Requires Go 1.27 or later.
+Requires **Go 1.27 or later**. This README describes the **v0.8.0** API.
 
-```bash
-go get github.com/uchaloop/confmaker
+```sh
+go get github.com/uchaloop/confmaker@v0.8.0
 ```
+
+```go
+import "github.com/uchaloop/confmaker"
+```
+
+The library reads ENV. It does not automatically load `.env` files, contact
+secret stores or start services. Set variables through your IDE, shell or deploy
+system.
 
 ## Quick start
 
-A library declares what it needs and reads nothing:
+In a real application, `StoreConfig` and `JobConfig` below belong to their
+respective packages. They need no dependency on confmaker. The application owns
+the explicit registration list.
 
 ```go
-package store
+package main
 
 import (
-    "fmt"
-    "time"
+	"fmt"
+	"log"
+	"time"
 
-    "github.com/uchaloop/secret/v2"
+	"github.com/uchaloop/confmaker"
 )
 
-type Config struct {
-	Host     string        `env:"HOST,notEmpty"`
-	Timeout  time.Duration `env:"TIMEOUT"`
-	Password secret.Secret `env:"PASSWORD"`
+type StoreConfig struct {
+	Host    string        `env:"HOST,notEmpty" envDescription:"Database address"`
+	Timeout time.Duration `env:"TIMEOUT" envDescription:"Database operation timeout"`
 }
 
-// ConfigName gives the instance name, and with it the prefix STORE_.
-func (Config) ConfigName() string { return "store" }
+func (c *StoreConfig) SetDefaults() { c.Timeout = 30 * time.Second }
 
-func (c *Config) SetDefaults() { c.Timeout = 30 * time.Second }
-
-func (c Config) Validate() error {
+func (c StoreConfig) Validate() error {
 	if c.Timeout <= 0 {
-		return fmt.Errorf("timeout must be positive, got %s", c.Timeout)
+		return fmt.Errorf("timeout must be positive")
 	}
+	return nil
+}
+
+type JobConfig struct {
+	Workers int `env:"WORKERS"`
+}
+
+func (c *JobConfig) SetDefaults() { c.Workers = 2 }
+
+func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
+	loader := confmaker.MakeLoader()
+	store := loader.Register[StoreConfig]("postgres")
+	job := loader.Register[JobConfig]("job")
+
+	if err := loader.Load(); err != nil {
+		return err
+	}
+
+	storeConfig, err := store.Value()
+	if err != nil {
+		return err
+	}
+	jobConfig, err := job.Value()
+	if err != nil {
+		return err
+	}
+
+	// Pass these values to the store and job constructors.
+	fmt.Println(storeConfig.Host, storeConfig.Timeout, jobConfig.Workers)
 	return nil
 }
 ```
 
-The application loads it from the environment:
+Run with `POSTGRES_HOST` set in your IDE, or from a shell:
 
-```bash
-export STORE_HOST=db:5432
-export STORE_PASSWORD=s3cr3t
+```sh
+export POSTGRES_HOST=localhost:5432
+go run .
 ```
 
-```go
-cfg, err := confmaker.Load[store.Config]()
-if err != nil {
-	log.Fatal(err)
-}
-```
+Output: `localhost:5432 30s 2`. Unset optional fields retain their defaults.
+For a single configuration, use `confmaker.Load[StoreConfig]("postgres")`.
 
-`cfg.Host` is `db:5432`, `cfg.Timeout` keeps its default of `30s`, and
-`cfg.Password` holds the secret without ever printing it.
-
-## Multiple configurations
-
-An application with several configs registers them on one `Loader` and loads
-them together, so one error reports the problems of all of them. The same type
-can be loaded twice under different names:
-
-```go
-loader := confmaker.MakeLoader()
-primary := loader.Add[store.Config]()                              // STORE_*
-replica := loader.Add[store.Config](confmaker.WithName("replica")) // REPLICA_*
-cache := loader.Add[cache.Config]()                                // CACHE_*
-
-if err := loader.Load(); err != nil {
-	log.Fatal(err)
-}
-
-primaryCfg, _ := primary.Value()
-replicaCfg, _ := replica.Value()
-cacheCfg, _ := cache.Value()
-```
-
-`WithName` sets the instance name and prefix; `WithPrefix` changes only the
-prefix.
-
-## How loading works
+## How it works
 
 ```mermaid
 flowchart TD
-    A["Add: name, prefix, schema"] --> B["Load: check registrations for conflicts"]
-    B -->|conflict| E["One error with every problem"]
-    B -->|no conflict| C["One snapshot of the environment"]
-    C --> D["SetDefaults"]
-    D --> F["Dump, when enabled"]
-    F --> G["Check for unknown variables"]
-    G --> H["Apply the environment to each config"]
-    H --> I["Validate each config that parsed"]
-    I --> J{"Any problem?"}
-    J -->|yes| E
-    J -->|no| K["Value returns the configs"]
+    A["Packages declare Config structs"] --> B["Application registers types and instance names"]
+    B --> C["Check declarations and conflicts"]
+    C --> D["Take one ENV snapshot"]
+    D --> E["SetDefaults → apply ENV → Validate"]
+    E --> F{"Any errors?"}
+    F -->|Yes| G["Return a combined error; expose no values"]
+    F -->|No| H["Pass typed values to consumers"]
 ```
 
-- An invalid registration, such as a bad tag, is reported, and the other
-  configs are still checked.
-- A dump that fails is reported too; it does not stop the other checks.
-- After an error no config is handed out. Calling `Load` again returns the same
-  result without reading the environment again.
+`Register` compiles the schema; errors are reported by `Load` or `Manifest`.
+`Load` checks all valid registrations, including ones with no consumer. Conflicts
+between registrations stop loading before defaults run. Unknown variables are
+checked under registered prefixes; unrelated ENV variables are ignored.
 
-A report reads like this:
+`Load` runs once. Later calls return the same result. All handles remain
+unavailable until the whole set loads successfully. A failed configuration
+prevents values from being handed out for the entire set.
 
-```text
-unknown configuration variable "STORE_HSOT" (did you mean "STORE_HOST"?)
-config "store": required variable "STORE_HOST" is not set
-config "cache": variable "CACHE_TTL": "soon" is not a duration such as "30s" or "5m"
-```
+## Names and multiple instances
+
+The instance name is explicit and determines the default ENV prefix:
+
+| Registration | ENV prefix |
+|---|---|
+| `Register[StoreConfig]("postgres")` | `POSTGRES_` |
+| `Register[StoreConfig]("read-replica")` | `READ_REPLICA_` |
+| `Register[StoreConfig]("replica", confmaker.WithPrefix("READ_DB_"))` | `READ_DB_` |
+
+Register the same type more than once under different names when configuring
+independent instances. Names contain lowercase letters, digits and `_`, `-`, `.`;
+they must start and end with a letter or digit. Names, resolved prefixes and
+full variable names must not collide. There is no implicit `ConfigName()` lookup.
+
+`WithPrefix` changes ENV names, not the instance name. Config options apply to
+one registration; ENV options such as `WithEnv`, `WithDump` and `AllowUnknown`
+apply to the loader.
 
 ## Configuration rules
 
 | Tag | Meaning |
 |---|---|
-| `env:"NAME"` | the field reads `<PREFIX>NAME` |
-| `env:"NAME,required"` | the variable must be set; `NAME=` is allowed |
-| `env:"NAME,notEmpty"` | the variable must be set to non-empty text (JSON `[]` is non-empty text) |
-| `env:"-"` | the field and anything nested in it are not configuration |
-| `envPrefix:"POOL_"` | on a struct field without `env`: extends the prefix for its fields |
-| `envSeparator:";"` | splits slice elements and map entries (default `,`) |
-| `envKeyValSeparator:"="` | splits a map key from its value (default `:`) |
-| `envFormat:"json"` | reads the field as JSON |
+| `env:"HOST"` | Read `<PREFIX>HOST`; absence retains the default |
+| `env:"HOST,required"` | ENV must contain the variable; empty text must still be parseable |
+| `env:"HOST,notEmpty"` | ENV must contain non-empty text |
+| `env:"-"` | Ignore the field and everything inside it |
+| `envPrefix:"POOL_"` | Extend the prefix for a nested config held by value |
+| `envDescription:"Database address"` | Description for manifest and exports |
+| `envSeparator:";"` | Separator for a plain slice or map; default `,` |
+| `envKeyValSeparator:"="` | Key/value separator for a plain map; default `:` |
+| `envFormat:"json"` | Read a structured value from one JSON variable |
 
-Supported types, how empty values are read, what is refused at registration and
-the other details are in the
-[package documentation](https://pkg.go.dev/github.com/uchaloop/confmaker).
+Defaults belong in `SetDefaults`, not `envDefault` tags. Only the root config's
+`SetDefaults` and `Validate` methods run; explicitly compose nested defaults or
+validation there when needed. `Validate` runs only after all fields of that
+configuration parse successfully. There is no tag that makes all nested fields
+required: mark individual fields.
 
-## JSON values
+Strings, bools, integers, floats, durations, text-unmarshalable types, scalar
+pointers, and supported slices/maps can be read in plain syntax. Examples:
+`30s`, `host-a,host-b`, `team:core,env:dev`.
 
-A field tagged `envFormat:"json"` reads a struct, slice or map from one variable:
+For structured data, a field such as
+`Endpoints []Endpoint` with `env:"ENDPOINTS" envFormat:"json"` reads one variable.
+A supplied JSON value replaces the whole default, rather than merging with it.
+JSON durations use strings such as `"30s"`. See [GoDoc](https://pkg.go.dev/github.com/uchaloop/confmaker)
+for JSON rules, custom types and supported shapes.
+
+## Errors and diagnostics
+
+The original error is the complete result. Structured problems let callers
+inspect configuration failures without parsing messages:
 
 ```go
-type Config struct {
-	Endpoints []Endpoint `env:"ENDPOINTS" envFormat:"json"`
+if err := loader.Load(); err != nil {
+	for _, problem := range confmaker.ConfigErrors(err) {
+		fmt.Printf("%s: config=%s variable=%s field=%s: %v\n",
+			problem.Kind, problem.InstanceName, problem.VariableName,
+			problem.FieldPath, problem)
+	}
+	return err
 }
-
-type Endpoint struct {
-	URL     string        `json:"url"`
-	Timeout time.Duration `json:"timeout"`
-}
 ```
 
-```text
-STORE_ENDPOINTS=[{"url":"http://a:9000","timeout":"30s"}]
-```
+Categories distinguish declarations, conflicts, missing or empty variables,
+parsing, unknown variables, validation and default rendering. `errors.As` finds
+the first `*confmaker.ConfigError`. `ConfigErrors` collects structured problems
+through wrappers and joins; a joined user `Validate` error remains one validation
+problem. Treat returned error pointers as read-only.
 
-> [!IMPORTANT]
-> A JSON environment value replaces the whole field; it does not merge with defaults.
+Original non-secret causes remain available through `errors.Is` and `errors.As`,
+including `strconv.ErrSyntax`, `strconv.ErrRange` and `*strconv.NumError`.
+Writer and lifecycle errors are separate, so always handle the original error
+even if `ConfigErrors` returns no entries.
 
-If the default had a timeout and the variable writes only `{"url":"http://a"}`,
-the timeout is zero - check such values in `Validate`. Unknown members are
-errors unless a JSON tag option such as `case:ignore` or an `embed` map says
-otherwise, and durations are strings such as `"30s"`.
-
-## Manifest and dump
-
-`Manifest` lists the variables a config reads, with their defaults. It does not
-read the environment, but it calls `SetDefaults` and renders each default:
-
-```go
-variables, err := confmaker.Manifest[store.Config]()
-```
-
-Printing each `Name=Default` gives this list of variables and their values (not
-an escaped shell script: quote values yourself for shell or YAML):
-
-```text
-STORE_HOST=
-STORE_TIMEOUT=30s
-STORE_PASSWORD=
-```
-
-`WithDump` prints, while loading, each variable with its ENV value or default
-and where it came from:
-
-```go
-loader := confmaker.MakeLoader(confmaker.WithDump(os.Stdout))
-```
-
-```text
-INSTANCE  VARIABLE        TYPE           VALUE    SOURCE
-store     STORE_HOST      string         db:5432  env
-store     STORE_PASSWORD  secret.Secret  (set)    env
-store     STORE_TIMEOUT   time.Duration  30s      default
-```
-
-> [!NOTE]
-> Fields of a secret type are never printed.
- A password written into a plain
-string, such as a URL, is not recognised as a secret: keep it in its own
-`secret.Secret` field.
+`confmaker.WithDump(writer)` prints values and their sources during loading.
+It runs before parsing/validation completes: a dump is diagnostic output, not
+proof of success. Secret types are masked. Ordinary strings and user validation
+messages are not automatically sanitized.
 
 ## Testing
 
-`WithEnv` loads from a map instead of the process environment, so a test needs no
-`t.Setenv` and can run in parallel:
+Use `WithEnv` to replace the process environment with an isolated map. The map is
+copied when the option is created; `WithEnv(nil)` means an empty environment.
 
 ```go
-func TestStore(t *testing.T) {
+func TestStoreConfig(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := confmaker.Load[store.Config](confmaker.WithEnv(map[string]string{
-		"STORE_HOST": "localhost",
+	cfg, err := confmaker.Load[StoreConfig]("postgres", confmaker.WithEnv(map[string]string{
+		"POSTGRES_HOST": "localhost:5432",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ...
+	if cfg.Timeout != 30*time.Second {
+		t.Fatalf("unexpected timeout: %s", cfg.Timeout)
+	}
 }
 ```
 
-`Validate` may return several problems at once; the optional
-[validate](https://github.com/uchaloop/validate) module is one way to collect
-them.
+This test uses `StoreConfig` from the quick start and imports `testing` and
+`time`. No process-wide ENV changes are needed.
 
-## Documentation
+## Manifest and configuration documentation
 
-- [confmaker](https://pkg.go.dev/github.com/uchaloop/confmaker): tags, types,
-  loading, manifest and dump.
-- [confx](https://pkg.go.dev/github.com/uchaloop/confx): the Fx adapter.
+### What it describes
 
+A manifest describes **what the application declares**: config instances,
+resolved prefixes, ENV names, Go types, required/secret flags, defaults and
+field descriptions. It is not a snapshot of the application's actual settings.
 
-## Recommended configuration
+Use it to inspect the full configuration surface, generate a reference for
+local setup, publish documentation or supply metadata to external tools.
+Ordinary application loading does not require it.
 
-> [!TIP]
-> We recommend [confmaker](https://github.com/uchaloop/confmaker) for typed ENV
-> configuration and [confx](https://github.com/uchaloop/confx) for its Fx integration.
-> Configuration loading stays in the application; it is optional for the work libraries.
+### Use the same registrations
 
-<details>
-<summary><strong>Configure from ENV with confmaker / confx</strong></summary>
-
-The pair separates configuration declarations from application wiring. A
-library declares an ordinary struct; the application chooses how to load it:
+After registration, choose either loading or description generation. For
+example, add this branch before `loader.Load()` in the quick start's `run`:
 
 ```go
-type Config struct {
-    Port int `env:"PORT"`
+if *showManifest {
+	return loader.WriteManifestMarkdown(os.Stdout)
 }
-
-func (Config) ConfigName() string { return "server" }
-func (c *Config) SetDefaults() { c.Port = 8080 }
 ```
 
-Without Fx:
+Define `showManifest` with `flag.Bool("manifest", false, "Print configuration documentation")`
+at package scope, import `flag` and `os`, and call `flag.Parse()` in `main` before
+`run`. Then `go run . -manifest` prints documentation without loading ENV or
+starting your services. Keep service construction after the normal load path.
+No second list of registrations is needed in this core-library example.
+
+For programmatic access after registration:
 
 ```go
-cfg, err := confmaker.Load[Config]() // SERVER_PORT, default 8080
+configs, err := loader.Manifest() // []confmaker.ConfigManifest
+if err != nil {
+	return err
+}
+for _, config := range configs {
+	fmt.Println(config.InstanceName, config.Prefix)
+	for _, variable := range config.Variables {
+		fmt.Println(variable.Name, variable.Required, variable.Description)
+	}
+}
 ```
 
-With Fx:
+`confmaker.Manifest[StoreConfig]("postgres")` describes a single type instead.
+`Loader.Manifest` also checks conflicts between all registered configurations.
+The same names and options describe the same ENV variables.
 
-```go
-confx.Module(),
-confx.Provide[Config](),
-```
+### Choose an output
 
-Import `github.com/uchaloop/confmaker` for the loader or
-`github.com/uchaloop/confx` for the Fx adapter.
-
-</details>
-
-## Related libraries
-
-| Library | Purpose |
+| Task | API |
 |---|---|
-| [confx](https://github.com/uchaloop/confx) | Provide configurations through Fx |
-| [secret](https://github.com/uchaloop/secret) | Explicit secret values |
+| Inspect metadata in Go | `loader.Manifest()` |
+| Generate an ENV reference | `loader.WriteEnvExample(writer)` |
+| Publish a documentation table | `loader.WriteManifestMarkdown(writer)` |
+| Feed external tools | `loader.WriteManifestJSON(writer)` |
+
+All exporters accept `io.Writer`; the caller opens and closes files. Generate
+into a buffer first if an existing file must not be truncated on generation
+failure. Writer failures can still leave partial output.
+
+An `.env.example` is a reference to keep in version control, not a secrets file
+or an automatically loaded configuration source. For the quick start's store:
+
+```dotenv
+# Configuration: "postgres"
+# Database address
+# Required; must not be empty.
+# POSTGRES_HOST=
+
+# Database operation timeout
+POSTGRES_TIMEOUT=30s
+```
+
+Safe non-zero scalar defaults become active assignments. Secrets, complex values
+and values requiring quoting become commented placeholders. Explicit zero,
+false and empty-string defaults cannot be distinguished from absent defaults.
+The template is not a shell script or a guarantee of compatibility with every
+dotenv parser.
+
+Markdown contains one section per config and a table of variables. JSON uses
+fixed camelCase keys, two-space indentation and a versioned envelope:
+
+```json
+{
+  "version": 1,
+  "configs": []
+}
+```
+
+Config entries contain `instanceName`, `prefix` and `variables`. Variable entries
+contain `name`, `description`, `type`, `required`, `notEmpty`, `secret`,
+`hasDefault` and, for non-secret fields, `default`. Empty lists are arrays.
+Consumers should check `version`. Neither camelCase nor snake_case is mandated
+by JSON itself; camelCase is this exporter's contract.
+
+### Guarantees and boundaries
+
+- Configs are ordered by instance name; variables retain declaration order.
+- Manifest reads no ENV, calls no `Validate`, writes no dump and does not make
+  handles ready. It can run before or after `Load`, including a failed load.
+- Each call evaluates fresh defaults and their marshalers. Keep those methods
+  deterministic and free of side effects; concurrent calls require safe methods.
+- Secret defaults are never rendered. Use a type from
+  [secret](https://github.com/uchaloop/secret), not an ordinary string containing
+  credentials. Descriptions are public documentation too.
+- Manifest and all exporters are strict: an invalid declaration, conflict or
+  unrepresentable default fails the whole description before output is written.
+  A commented placeholder does not bypass that check.
+- Manifest does not verify Vault keys, deploy settings or service availability.
+  Such checks belong to external tools consuming its metadata.
+
+## Important behavior
+
+| Rule | Why |
+|---|---|
+| Defaults do not satisfy `required` or `notEmpty` | These tags require the deployment to supply ENV |
+| `notEmpty` checks text, not the decoded value | JSON `[]` is non-empty text; domain limits belong in `Validate` |
+| Nested configs are held by value | Their structure must not depend on allocation or collection contents |
+| Scalar pointers are supported; pointer-only type cycles are rejected | A parser must eventually reach a concrete value |
+| Plain ENV maps reject pointer keys and non-reflexive keys such as `NaN` | Address identity or `NaN != NaN` would defeat duplicate checks; NaN values remain supported |
+| Map keys and values are not silently trimmed | Whitespace must not change configuration unnoticed |
+| Plain collection defaults cannot contain nil pointer chains or ambiguous separators | The description must not silently change their meaning |
+| Defaults with unrepresentable text can still load without `WithDump` | Normal loading does not need to render defaults |
+| Loaded configs are read-only by convention | Returned structs may share maps, slices and pointers |
+| Unknown variables are checked only under registered prefixes | Unrelated process settings belong to other components; use `AllowUnknown` for explicit exceptions |
+
+## Reference
+
+- [GoDoc](https://pkg.go.dev/github.com/uchaloop/confmaker): complete API and type rules.
+- [confx](https://github.com/uchaloop/confx): the Uber Fx adapter.
+- [Changelog](CHANGELOG.md): changes and migration notes.
 
 ## Acknowledgements
 
-Thanks also to the authors of [caarlos0/env](https://github.com/caarlos0/env)
-for the tag conventions and implementation ideas that informed confmaker.
+Thanks to the authors of [caarlos0/env](https://github.com/caarlos0/env) for the
+tag conventions and implementation ideas that informed confmaker.
 
 ## License
 

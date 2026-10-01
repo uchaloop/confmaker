@@ -12,17 +12,17 @@ var (
 	// ErrNotLoaded is returned by [Handle.Value] until [Loader.Load] has finished.
 	ErrNotLoaded = errors.New("configuration is not loaded; call Load first")
 	// ErrRegisteredAfterLoad is returned by [Handle.Value] for a config added
-	// with [Loader.Add] once Load had started.
+	// with [Loader.Register] once Load had started.
 	ErrRegisteredAfterLoad = errors.New("config registered after Load started; register every config before loading")
 )
 
 // Loader loads a set of configs together: configs are registered with
-// [Loader.Add], loaded with [Loader.Load], and read with [Handle.Value].
+// [Loader.Register], loaded with [Loader.Load], and read with [Handle.Value].
 //
 // A Loader is safe for concurrent use and holds no lock while user code runs:
-// ConfigName, SetDefaults, Validate, unmarshalers and the dump writer may call
-// Add or Value on the same Loader. They must not call its Load, which would wait
-// for the load it is part of.
+// SetDefaults, Validate, unmarshalers and the dump writer may call
+// Register on that Loader or Value on its handles. They must not call Load
+// recursively: it would wait for the load already in progress.
 type Loader struct {
 	env    envSettings
 	envErr error
@@ -48,26 +48,23 @@ const (
 // panic itself propagates from the Load call that ran it.
 var errLoadPanicked = errors.New("configuration loading panicked")
 
-// registration is one Add call: the compiled config, or why it could not be
-// compiled, and the value once loaded. typeName identifies a registration whose
+// registration is one Register call: the compiled config, or why it could not be
+// compiled, and its load callback. typeName identifies a registration whose
 // name could not be resolved, so its error still sorts to a stable place.
 type registration struct {
 	descriptor
 	typeName string
 	err      error
-	value    any
+	fill     func(any, environment) error
 }
 
-// descriptor carries a registration's schema and the two steps of loading it.
-// defaults returns a fresh *T after SetDefaults; fill applies the environment to
-// that pointer, validates it and returns the T. Between the two a dump can
-// describe the defaults of the very instance that is loaded.
+// descriptor carries immutable schema and a factory for fresh defaults.
+// Loading and manifest generation use independent instances from that factory.
 type descriptor struct {
-	label    string
-	prefix   string
-	fields   []fieldSpec
-	defaults func() any
-	fill     func(any, environment) (any, error)
+	instanceName string
+	prefix       string
+	fields       []fieldSpec
+	defaults     func() any
 }
 
 // MakeLoader returns an empty [Loader]. opts configure the whole load: [WithEnv],
@@ -76,7 +73,7 @@ func MakeLoader(opts ...EnvOption) *Loader {
 	l := &Loader{}
 	for _, opt := range opts {
 		if opt == nil {
-			l.envErr = errors.New("a load option must not be nil")
+			l.envErr = makeConfigError(ErrorDeclaration, "", "", errors.New("a load option must not be nil"))
 			continue
 		}
 
@@ -86,16 +83,18 @@ func MakeLoader(opts ...EnvOption) *Loader {
 	return l
 }
 
-// Add registers a config of type T and returns the [Handle] to read it from. The
-// instance name comes from [WithName] or T's ConfigName method.
+// Register registers a struct config of type T and returns its [Handle].
+// The required name labels errors and determines the default ENV prefix:
+// "read-replica" reads READ_REPLICA_*. [WithPrefix] overrides only the prefix.
+// Names must be non-empty, contain only lowercase letters, digits, _ - .,
+// and start and end with a letter or digit.
 //
-// An invalid registration - no name, a bad tag, a secret inside a JSON value - is
-// reported by [Loader.Load] with every other problem. Once Load has started, Add
+// An invalid registration, such as an empty name or bad tag, is reported by
+// [Loader.Load] or [Loader.Manifest]. Once Load has started, Register
 // registers nothing and calls no method of T; the handle's Value returns
 // [ErrRegisteredAfterLoad].
-func (l *Loader) Add[T any](opts ...ConfigOption) *Handle[T] {
-	// A late registration runs no user code, not even ConfigName. The lock is
-	// released before ConfigName runs.
+func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
+	// A late registration runs no user code.
 	l.mu.Lock()
 	open := l.state == registering
 	l.mu.Unlock()
@@ -103,14 +102,24 @@ func (l *Loader) Add[T any](opts ...ConfigOption) *Handle[T] {
 		return &Handle[T]{err: ErrRegisteredAfterLoad}
 	}
 
-	// ConfigName is user code: resolve the registration without the lock.
+	// Resolve the registration without holding the lock.
 	r := &registration{typeName: reflect.TypeFor[T]().String()}
-	set, err := resolveSettings[T](opts)
-	if err == nil {
-		r.descriptor, err = makeDescriptor[T](set)
-	}
+	r.descriptor, r.err = makeDescriptor[T](name, opts)
+	// Handles, including copies, share typed storage. Value exposes it only
+	// after Load publishes completion under the loader mutex.
+	value := new(T)
+	if r.err == nil {
+		r.fill = func(defaults any, env environment) error {
+			cfg := defaults.(*T)
+			if err := applyAndValidate(cfg, r.fields, r.instanceName, env); err != nil {
+				return err
+			}
 
-	r.err = err
+			*value = *cfg
+
+			return nil
+		}
+	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -122,7 +131,7 @@ func (l *Loader) Add[T any](opts ...ConfigOption) *Handle[T] {
 
 	l.registrations = append(l.registrations, r)
 
-	return &Handle[T]{loader: l, registration: r}
+	return &Handle[T]{loader: l, value: value}
 }
 
 // Load loads every registered config and returns every problem as one error:
@@ -173,13 +182,14 @@ func (l *Loader) Load() error {
 }
 
 // Load loads one config of type T, as a [Loader] with a single registration would.
-// It takes both a [ConfigOption] ([WithName], [WithPrefix]) and an [EnvOption]
+// The required name determines the default ENV prefix. Options include
+// [ConfigOption] ([WithPrefix]) and [EnvOption]
 // ([WithEnv], [WithDump], [AllowUnknown]). Unknown variables are looked for under
 // T's own prefix only. On error it returns the zero T.
 //
-//	cfg, err := confmaker.Load[store.Config]()
-//	cfg, err := confmaker.Load[store.Config](confmaker.WithName("replica"), confmaker.WithEnv(vars))
-func Load[T any](opts ...LoadOption) (T, error) {
+//	cfg, err := confmaker.Load[store.Config]("store")
+//	cfg, err := confmaker.Load[store.Config]("replica", confmaker.WithEnv(vars))
+func Load[T any](name string, opts ...LoadOption) (T, error) {
 	var (
 		configOpts []ConfigOption
 		envOpts    []EnvOption
@@ -198,7 +208,7 @@ func Load[T any](opts ...LoadOption) (T, error) {
 	}
 
 	loader := MakeLoader(envOpts...)
-	handle := loader.Add[T](configOpts...)
+	handle := loader.Register[T](name, configOpts...)
 
 	if err := loader.Load(); err != nil {
 		var cfg T
@@ -208,12 +218,12 @@ func Load[T any](opts ...LoadOption) (T, error) {
 	return handle.Value()
 }
 
-// Handle is a config registered with [Loader.Add], read with [Handle.Value]. The
+// Handle is a config registered with [Loader.Register], read with [Handle.Value]. The
 // zero Handle belongs to no loader, and its Value returns an error.
 type Handle[T any] struct {
-	loader       *Loader
-	registration *registration
-	err          error
+	loader *Loader
+	value  *T
+	err    error
 }
 
 // Value returns the loaded config, or an error:
@@ -231,7 +241,7 @@ func (h *Handle[T]) Value() (T, error) {
 	case h.err != nil:
 		return cfg, h.err
 	case h.loader == nil:
-		return cfg, errors.New("handle belongs to no loader; get one from Loader.Add")
+		return cfg, errors.New("handle belongs to no loader; get one from Loader.Register")
 	}
 
 	h.loader.mu.Lock()
@@ -244,29 +254,23 @@ func (h *Handle[T]) Value() (T, error) {
 		return cfg, h.loader.err
 	}
 
-	return h.registration.value.(T), nil
+	return *h.value, nil
 }
 
-// makeDescriptor compiles T's schema and binds the functions that load it.
-// Nothing is evaluated until one of them is called.
-func makeDescriptor[T any](set configSettings) (descriptor, error) {
-	fields, err := compileSchema(reflect.TypeFor[T](), set.prefix)
+// makeDescriptor compiles T's schema and binds its defaults factory.
+// Defaults are not evaluated until the factory is called.
+func makeDescriptor[T any](name string, opts []ConfigOption) (descriptor, error) {
+	set, fields, err := prepareConfig[T](name, opts)
 	if err != nil {
-		return descriptor{}, makeConfigError(set.name, err)
+		return descriptor{}, err
 	}
 
-	return descriptor{label: set.name, prefix: set.prefix, fields: fields,
+	return descriptor{instanceName: set.name, prefix: set.prefix, fields: fields,
 		defaults: func() any {
 			cfg := new(T)
 			setDefaults(cfg)
 
 			return cfg
-		},
-		fill: func(ptr any, env environment) (any, error) {
-			cfg := ptr.(*T)
-			err := applyAndValidate(cfg, fields, set.name, env)
-
-			return *cfg, err
 		},
 	}, nil
 }
@@ -286,20 +290,10 @@ func (l *Loader) load(registrations []*registration) error {
 	}
 
 	if l.env.envRepeated {
-		errs = append(errs, errors.New("WithEnv is given more than once; pass one complete environment"))
+		errs = append(errs, makeConfigError(ErrorDeclaration, "", "", errors.New("WithEnv is given more than once; pass one complete environment")))
 	}
 
-	// Sort every registration, failed ones included, so the report does not
-	// depend on the order of Add calls. The errors themselves are kept as they
-	// are for errors.Is and errors.As.
-	slices.SortStableFunc(registrations, func(a, b *registration) int {
-		return cmp.Or(
-			cmp.Compare(a.label, b.label),
-			cmp.Compare(a.prefix, b.prefix),
-			cmp.Compare(a.typeName, b.typeName),
-			cmp.Compare(errorText(a.err), errorText(b.err)),
-		)
-	})
+	sortRegistrations(registrations)
 
 	ready := make([]*registration, 0, len(registrations))
 	for _, r := range registrations {
@@ -340,16 +334,27 @@ func (l *Loader) load(registrations []*registration) error {
 	}
 
 	for i, r := range ready {
-		value, err := r.fill(configs[i], env)
-		if err != nil {
+		if err := r.fill(configs[i], env); err != nil {
 			errs = append(errs, err)
-			continue
 		}
-
-		r.value = value
 	}
 
 	return errors.Join(errs...)
+}
+
+// sortRegistrations orders a private snapshot without changing the loader's list.
+func sortRegistrations(registrations []*registration) {
+	// Sort every registration, failed ones included, so the report does not
+	// depend on the order of Register calls. The errors themselves are kept as they
+	// are for errors.Is and errors.As.
+	slices.SortStableFunc(registrations, func(a, b *registration) int {
+		return cmp.Or(
+			cmp.Compare(a.instanceName, b.instanceName),
+			cmp.Compare(a.prefix, b.prefix),
+			cmp.Compare(a.typeName, b.typeName),
+			cmp.Compare(errorText(a.err), errorText(b.err)),
+		)
+	})
 }
 
 func errorText(err error) string {

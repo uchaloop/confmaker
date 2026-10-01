@@ -197,11 +197,7 @@ func jsonKindName(kind jsontext.Kind) string {
 func renderJSON(value reflect.Value) (string, error) {
 	// Marshal through a pointer, so pointer-receiver methods are found. A field
 	// of a loaded config is addressable; only other values need a copy.
-	if !value.CanAddr() {
-		copy := reflect.New(value.Type()).Elem()
-		copy.Set(value)
-		value = copy
-	}
+	value = addressableValue(value)
 
 	raw, err := json.Marshal(value.Addr().Interface(), jsonFieldOptions)
 

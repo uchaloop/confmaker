@@ -39,12 +39,12 @@ func plainFuzzCodecs(tb testing.TB) []plainFuzzCodec {
 
 	codecs := make([]plainFuzzCodec, 0, len(fields))
 	for _, field := range fields {
-		parse, emit, err := fieldCodec(field)
+		codec, err := makeFieldCodec(field)
 		if err != nil {
 			tb.Fatalf("%s: %v", field.Name, err)
 		}
 
-		codecs = append(codecs, plainFuzzCodec{name: field.Name, field: field, parse: parse, emit: emit})
+		codecs = append(codecs, plainFuzzCodec{name: field.Name, field: field, parse: codec.parse, emit: codec.render})
 	}
 
 	return codecs
