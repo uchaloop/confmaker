@@ -74,7 +74,7 @@ func TestManifestReportsAnInvalidDeclaration(t *testing.T) {
 		Shards []pool
 	}
 
-	variables, err := Manifest[config](WithName("confxapp"))
+	variables, err := Manifest[config]("confxapp")
 	if err == nil {
 		t.Fatal("an invalid declaration produced a manifest instead of an error")
 	}
@@ -91,11 +91,11 @@ func TestInstanceNameIsChecked(t *testing.T) {
 
 	for _, name := range rejected {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Manifest[strictConfig](WithName(name)); err == nil {
+			if _, err := Manifest[strictConfig](name); err == nil {
 				t.Errorf("Manifest accepted %q", name)
 			}
 
-			if _, err := Load[strictConfig](WithEnv(nil), WithName(name)); err == nil {
+			if _, err := Load[strictConfig](name, WithEnv(nil)); err == nil {
 				t.Errorf("Load accepted %q", name)
 			}
 		})
@@ -168,7 +168,7 @@ func TestConfigErrorLabelsEveryLine(t *testing.T) {
 		User string `env:"USER,required"`
 	}
 
-	_, err := Load[config](WithName("confxpostgres"), WithPrefix("CONFXAPP_"), WithEnv(nil))
+	_, err := Load[config]("confxpostgres", WithPrefix("CONFXAPP_"), WithEnv(nil))
 	if err == nil {
 		t.Fatal("expected both variables to be reported")
 	}
@@ -197,8 +197,8 @@ func TestTwoInstancesMayNotShareAPrefix(t *testing.T) {
 	}
 
 	loader := MakeLoader(WithEnv(env))
-	loader.Add[strictConfig](WithName("confx-replica"))
-	loader.Add[strictConfig](WithName("confx_replica"))
+	loader.Register[strictConfig]("confx-replica")
+	loader.Register[strictConfig]("confx_replica")
 	err := loader.Load()
 	if err == nil {
 		t.Fatal("two instances read one prefix and the check said nothing")

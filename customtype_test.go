@@ -50,7 +50,7 @@ func TestCustomTypeParsesThroughItsOwnTextForm(t *testing.T) {
 		"APP_PRICE": "1250",
 	}
 
-	cfg, err := Load[moneyConfig](WithName("app"), WithEnv(env))
+	cfg, err := Load[moneyConfig]("app", WithEnv(env))
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestCustomTypeKeepsItsDefaultAndRendersIt(t *testing.T) {
 	t.Parallel()
 
 	// Nothing is set, so SetDefaults stands.
-	cfg, err := Load[moneyConfig](WithName("app"), WithEnv(nil))
+	cfg, err := Load[moneyConfig]("app", WithEnv(nil))
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestCustomTypeReportsItsOwnParseError(t *testing.T) {
 		"APP_PRICE": "free",
 	}
 
-	_, err := Load[moneyConfig](WithName("app"), WithEnv(env))
+	_, err := Load[moneyConfig]("app", WithEnv(env))
 	if err == nil {
 		t.Fatal("a value the type rejects was accepted")
 	}
@@ -103,7 +103,7 @@ func TestCustomTypeIsValidatedByTheConfig(t *testing.T) {
 		"APP_PRICE": "0",
 	}
 
-	_, err := Load[moneyConfig](WithName("app"), WithEnv(env))
+	_, err := Load[moneyConfig]("app", WithEnv(env))
 	if err == nil || !strings.Contains(err.Error(), "price must be positive") {
 		t.Fatalf("Validate did not see the parsed value: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestCustomTypeInCollections(t *testing.T) {
 		Tiers  map[string]money `env:"TIERS"`
 	}
 
-	cfg, err := Load[config](WithName("app"), WithEnv(env))
+	cfg, err := Load[config]("app", WithEnv(env))
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}

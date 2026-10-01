@@ -18,7 +18,7 @@ func (c *schemaConfig) SetDefaults() { schemaDefaultCalls.Add(1) }
 func TestLoaderLoadsWithoutEncoder(t *testing.T) {
 	schemaDefaultCalls.Store(0)
 	loader := MakeLoader(WithEnv(map[string]string{"CONFXSCHEMA_VALUE": "abcd"}))
-	handle := loader.Add[schemaConfig](WithName("confxschema"))
+	handle := loader.Register[schemaConfig]("confxschema")
 	if schemaDefaultCalls.Load() != 0 {
 		t.Fatal("registration evaluated defaults")
 	}
@@ -33,7 +33,7 @@ func TestLoaderLoadsWithoutEncoder(t *testing.T) {
 	}
 
 	typo := WithEnv(map[string]string{"CONFXSCHEMA_VALUE": "abcd", "CONFXSCHEMA_VLAUE": "typo"})
-	if _, err := Load[schemaConfig](typo, WithName("confxschema")); err == nil || !strings.Contains(err.Error(), "unknown configuration variable") {
+	if _, err := Load[schemaConfig]("confxschema", typo); err == nil || !strings.Contains(err.Error(), "unknown configuration variable") {
 		t.Fatalf("schema did not check typo: %v", err)
 	}
 }
@@ -42,12 +42,12 @@ func TestDumpAndManifestStillRequireEncoder(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
-	_, err := Load[schemaConfig](WithDump(&out), WithEnv(nil), WithName("confxschema"))
+	_, err := Load[schemaConfig]("confxschema", WithDump(&out), WithEnv(nil))
 	if err == nil || !strings.Contains(err.Error(), "TextMarshaler") || !strings.Contains(err.Error(), `config "confxschema"`) {
 		t.Fatalf("dump error: %v", err)
 	}
 
-	if _, err := Manifest[schemaConfig](WithName("confxschema")); err == nil || !strings.Contains(err.Error(), `config "confxschema"`) {
+	if _, err := Manifest[schemaConfig]("confxschema"); err == nil || !strings.Contains(err.Error(), `config "confxschema"`) {
 		t.Fatalf("manifest error: %v", err)
 	}
 }
@@ -68,14 +68,14 @@ func TestLoadersDoNotShareValues(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{"CONFXSCHEMA_LEFT_VALUE": "left", "CONFXSCHEMA_RIGHT_VALUE": "right"}
-	first, err := Load[schemaNested](WithEnv(env), WithName("confxschema"))
+	first, err := Load[schemaNested]("confxschema", WithEnv(env))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	first.Items[0] = "mutated"
 	env["CONFXSCHEMA_LEFT_VALUE"] = "changed"
-	second, err := Load[schemaNested](WithEnv(env), WithName("confxschema"))
+	second, err := Load[schemaNested]("confxschema", WithEnv(env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,11 +94,11 @@ func (*invalidDefaults) SetDefaults() { panic("invalid declaration must fail bef
 func TestInvalidDeclarationFailsBeforeDefaults(t *testing.T) {
 	t.Parallel()
 
-	if _, err := Load[invalidDefaults](WithEnv(nil), WithName("confxschema")); err == nil {
+	if _, err := Load[invalidDefaults]("confxschema", WithEnv(nil)); err == nil {
 		t.Fatal("invalid config accepted")
 	}
 
-	if _, err := Manifest[invalidDefaults](WithName("confxschema")); err == nil {
+	if _, err := Manifest[invalidDefaults]("confxschema"); err == nil {
 		t.Fatal("invalid manifest accepted")
 	}
 }

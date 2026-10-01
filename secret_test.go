@@ -23,14 +23,14 @@ func TestParseErrorNeverCarriesASecretValue(t *testing.T) {
 	// secret.Secret decodes anything, so the guarantee is checked through the
 	// dump and the manifest instead, and through a value that fails elsewhere.
 
-	_, err := Load[config](WithName("confxapp"), WithEnv(env))
+	_, err := Load[config]("confxapp", WithEnv(env))
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
 	var out bytes.Buffer
 
-	if _, err := Load[config](WithDump(&out), WithEnv(env), WithName("confxapp")); err != nil {
+	if _, err := Load[config]("confxapp", WithDump(&out), WithEnv(env)); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
@@ -75,7 +75,7 @@ func TestSecretBehindAnyPointerDepthIsMasked(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	cfg, err := Load[single](WithName("confxapp"), WithDump(&out), WithEnv(map[string]string{"CONFXAPP_PASSWORD": "FAKE_SECRET"}))
+	cfg, err := Load[single]("confxapp", WithDump(&out), WithEnv(map[string]string{"CONFXAPP_PASSWORD": "FAKE_SECRET"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestParseErrorBehindPointersNeverPrintsTheValue(t *testing.T) {
 		Password **secret.Secret `env:"PASSWORD,notEmpty"`
 	}
 
-	_, err := Load[config](WithName("confxapp"), WithEnv(map[string]string{"CONFXAPP_PASSWORD": ""}))
+	_, err := Load[config]("confxapp", WithEnv(map[string]string{"CONFXAPP_PASSWORD": ""}))
 	if err == nil || strings.Contains(err.Error(), "FAKE") {
 		t.Fatalf("got %v", err)
 	}

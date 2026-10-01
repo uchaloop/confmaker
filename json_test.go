@@ -65,7 +65,7 @@ func TestJSONLoadsStructsListsAndMaps(t *testing.T) {
 		"CONFXJSON_WINDOWS":   `{"fast":"100ms"}`,
 	}
 
-	cfg, err := Load[jsonConfig](WithName("confxjson"), WithEnv(env))
+	cfg, err := Load[jsonConfig]("confxjson", WithEnv(env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestJSONReplacesTheWholeDefault(t *testing.T) {
 	// Only attempts is written, so delay does not survive from the default, and
 	// the map holds exactly what the variable says.
 
-	cfg, err := Load[jsonConfig](WithName("confxjson"), WithEnv(env))
+	cfg, err := Load[jsonConfig]("confxjson", WithEnv(env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestJSONNullAndEmptyCollections(t *testing.T) {
 		"CONFXJSON_FALLBACK":  `null`,
 	}
 
-	cfg, err := Load[jsonConfig](WithName("confxjson"), WithEnv(env))
+	cfg, err := Load[jsonConfig]("confxjson", WithEnv(env))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestJSONErrorKeepsTheOriginal(t *testing.T) {
 		"CONFXJSON_ENDPOINTS": `[{"url":"x"`,
 	}
 
-	_, err := Load[jsonConfig](WithName("confxjson"), WithEnv(env))
+	_, err := Load[jsonConfig]("confxjson", WithEnv(env))
 
 	var semantic *json.SemanticError
 	if !errors.As(err, &semantic) || semantic.JSONPointer != "/attempts" || semantic.GoType != reflect.TypeFor[int]() {
@@ -220,7 +220,7 @@ func TestJSONErrorNamesTheVariable(t *testing.T) {
 		"CONFXJSON_RETRY": `{"attempts":"five"}`,
 	}
 
-	_, err := Load[jsonConfig](WithName("confxjson"), WithEnv(env))
+	_, err := Load[jsonConfig]("confxjson", WithEnv(env))
 	want := `config "confxjson": variable "CONFXJSON_RETRY": JSON at "/attempts": a string cannot be read into int`
 	if err == nil || err.Error() != want {
 		t.Fatalf("got %v, want %q", err, want)
@@ -285,14 +285,14 @@ func TestJSONDeclarationsAreChecked(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := fieldCodec(tc.field)
+			_, err := makeFieldCodec(tc.field)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v, want %q", err, tc.want)
 			}
 		})
 	}
 
-	if _, _, err := fieldCodec(jsonField[[]jsonNamedBytes](`envFormat:"json"`)); err != nil {
+	if _, err := makeFieldCodec(jsonField[[]jsonNamedBytes](`envFormat:"json"`)); err != nil {
 		t.Fatalf("bytes with a text form refused: %v", err)
 	}
 }
@@ -340,7 +340,7 @@ func TestJSONManifestIsDeterministicAndLoadsBack(t *testing.T) {
 	// Writing every default back into the environment loads the same config.
 	var original jsonConfig
 	original.SetDefaults()
-	loaded, err := Load[jsonConfig](WithName("confxjson"), WithEnv(defaults))
+	loaded, err := Load[jsonConfig]("confxjson", WithEnv(defaults))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +357,7 @@ func TestJSONThroughLoader(t *testing.T) {
 		"CONFXJSON_ENDPOINTS": `[{"url":"http://a","timeout":"soon"}]`,
 	}
 
-	_, err := Load[jsonConfig](WithEnv(env), WithName("confxjson"))
+	_, err := Load[jsonConfig]("confxjson", WithEnv(env))
 	want := `config "confxjson": variable "CONFXJSON_ENDPOINTS": JSON at "/0/timeout": time: invalid duration "soon"`
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("got %v, want %q", err, want)
@@ -443,7 +443,7 @@ func TestJSONIgnoresOnlyAFieldTaggedDash(t *testing.T) {
 		Name    string   `json:"name"`
 	}
 
-	if _, _, err := fieldCodec(jsonField[ignored](`envFormat:"json"`)); err != nil {
+	if _, err := makeFieldCodec(jsonField[ignored](`envFormat:"json"`)); err != nil {
 		t.Fatalf(`json:"-" was not ignored: %v`, err)
 	}
 
@@ -452,7 +452,7 @@ func TestJSONIgnoresOnlyAFieldTaggedDash(t *testing.T) {
 		Dash chan int `json:"-,omitempty"`
 	}
 
-	if _, _, err := fieldCodec(jsonField[named](`envFormat:"json"`)); err == nil || !strings.Contains(err.Error(), "chan int cannot be read from JSON") {
+	if _, err := makeFieldCodec(jsonField[named](`envFormat:"json"`)); err == nil || !strings.Contains(err.Error(), "chan int cannot be read from JSON") {
 		t.Fatalf(`json:"-,omitempty" was treated as ignored: %v`, err)
 	}
 

@@ -21,11 +21,11 @@ func dumpDefaults(w io.Writer, descriptors []descriptor, configs []any, env envi
 	for i, d := range descriptors {
 		variables, err := describeFields(reflect.ValueOf(configs[i]).Elem(), d.fields)
 		if err != nil {
-			errs = append(errs, makeConfigError(d.label, err))
+			errs = append(errs, wrapConfigError(d.instanceName, err))
 			continue
 		}
 
-		sections = append(sections, dumpSection{label: d.label, variables: variables})
+		sections = append(sections, dumpSection{instanceName: d.instanceName, variables: variables})
 	}
 
 	if err := writeDump(w, sections, env); err != nil {
@@ -49,7 +49,7 @@ func writeDump(w io.Writer, sections []dumpSection, env environment) error {
 
 		for _, variable := range section.variables {
 			value, source := describeValue(variable, env)
-			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", dumpCell(section.label), dumpCell(variable.Name), dumpCell(variable.Type), dumpCell(value), source)
+			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", dumpCell(section.instanceName), dumpCell(variable.Name), dumpCell(variable.Type), dumpCell(value), source)
 		}
 	}
 
@@ -58,8 +58,8 @@ func writeDump(w io.Writer, sections []dumpSection, env environment) error {
 
 // dumpSection is one instance's variables in a dump.
 type dumpSection struct {
-	label     string
-	variables []Variable
+	instanceName string
+	variables    []Variable
 }
 
 // describeValue returns what to print for a variable and where the value comes

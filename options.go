@@ -13,7 +13,7 @@ type LoadOption interface {
 	loadOption()
 }
 
-// ConfigOption configures one config: [WithName] and [WithPrefix]. [Loader.Add],
+// ConfigOption configures one config with [WithPrefix]. [Loader.Register],
 // [Manifest] and [Load] take it.
 type ConfigOption interface {
 	LoadOption
@@ -29,8 +29,8 @@ type EnvOption interface {
 
 // configSettings holds the resolved options of one config.
 type configSettings struct {
-	name, prefix                     string
-	nameSet, prefixSet, nameRepeated bool
+	name, prefix string
+	prefixSet    bool
 }
 
 // envSettings holds the resolved options of a load.
@@ -51,18 +51,9 @@ type envOption func(*envSettings)
 func (o envOption) applyEnv(s *envSettings) { o(s) }
 func (envOption) loadOption()               {}
 
-// WithName sets the instance name, instead of the config's ConfigName. The name
-// gives the default prefix ("read-replica" reads READ_REPLICA_*) and labels the
-// config in errors. It may be given once per config.
-func WithName(name string) ConfigOption {
-	return configOption(func(s *configSettings) {
-		s.nameRepeated = s.nameSet
-		s.name, s.nameSet = name, true
-	})
-}
-
 // WithPrefix overrides the environment prefix without changing the instance
-// name. It must contain upper-case letters, digits or underscores and end with
+// name. It must be non-empty, contain only upper-case letters, digits or
+// underscores, and end with
 // an underscore, for example "REPLICA_POSTGRES_".
 func WithPrefix(prefix string) ConfigOption {
 	return configOption(func(s *configSettings) {
@@ -100,10 +91,10 @@ func WithDump(w io.Writer) EnvOption {
 	})
 }
 
-// resolveSettings applies the options of one config and completes its name and
-// prefix from ConfigName and the name.
-func resolveSettings[T any](opts []ConfigOption) (configSettings, error) {
-	var set configSettings
+// resolveSettings validates the explicit name and options of one config and
+// derives its prefix when none is supplied.
+func resolveSettings[T any](name string, opts []ConfigOption) (configSettings, error) {
+	set := configSettings{name: name}
 	for _, opt := range opts {
 		if opt == nil {
 			return set, errors.New("a config option must not be nil")
@@ -112,24 +103,8 @@ func resolveSettings[T any](opts []ConfigOption) (configSettings, error) {
 		opt.applyConfig(&set)
 	}
 
-	if set.nameRepeated {
-		return set, fmt.Errorf("config %s is given an instance name more than once", reflect.TypeFor[T]())
-	}
-
-	if !set.nameSet {
-		// Only structs are configs. Checking before calling a user method also
-		// avoids invoking a promoted method through a nil *T.
-		if reflect.TypeFor[T]().Kind() != reflect.Struct {
-			return set, fmt.Errorf("a config must be a struct, got %s", reflect.TypeFor[T]())
-		}
-
-		var cfg T
-		namer, ok := any(&cfg).(ConfigNamer)
-		if !ok {
-			return set, fmt.Errorf("config %s has no instance name; use WithName or implement ConfigName() string", reflect.TypeFor[T]())
-		}
-
-		set.name = namer.ConfigName()
+	if reflect.TypeFor[T]().Kind() != reflect.Struct {
+		return set, fmt.Errorf("a config must be a struct, got %s", reflect.TypeFor[T]())
 	}
 
 	if err := checkName(set.name); err != nil {

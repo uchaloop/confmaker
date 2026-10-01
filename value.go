@@ -36,20 +36,20 @@ type parser func(target reflect.Value, raw string) error
 // first deployment that happens to set its variable, and it leaves one place
 // that decides what a type means.
 func fieldParser(t reflect.Type, separator, keyValSeparator string) (parser, error) {
-	// A named slice or map that decodes itself owns its whole syntax, so this
-	// comes before any splitting.
+	if t.Kind() != reflect.Slice && t.Kind() != reflect.Map {
+		return scalarParser(t)
+	}
+
+	// A named collection with UnmarshalText owns its whole syntax.
 	if declaresTextForm(t) {
 		return parseText, nil
 	}
 
-	switch t.Kind() {
-	case reflect.Slice:
+	if t.Kind() == reflect.Slice {
 		return sliceParser(t, separator)
-	case reflect.Map:
-		return mapParser(t, separator, keyValSeparator)
-	default:
-		return scalarParser(t)
 	}
+
+	return mapParser(t, separator, keyValSeparator)
 }
 
 // scalarParser returns the parser for a single value.
@@ -144,6 +144,10 @@ func sliceParser(t reflect.Type, separator string) (parser, error) {
 // overwrite, and surrounding whitespace is rejected rather than trimmed, so
 // "a: 1" reports itself instead of yielding the value " 1".
 func mapParser(t reflect.Type, separator, keyValSeparator string) (parser, error) {
+	if t.Key().Kind() == reflect.Pointer {
+		return nil, fmt.Errorf("map key %s is a pointer; ENV map keys must compare by value", t.Key())
+	}
+
 	if len(separator) == 0 {
 		return nil, errors.New("envSeparator is empty; a map needs something to split entries on")
 	}
@@ -192,6 +196,12 @@ func mapParser(t reflect.Type, separator, keyValSeparator string) (parser, error
 				return fmt.Errorf("key %q: %w", rawKey, err)
 			}
 
+			// NaN, including inside a custom key, cannot be found again in a
+			// map and would bypass the duplicate-key check below.
+			if !key.Equal(key) {
+				return fmt.Errorf("key %q is not equal to itself and cannot be used as an ENV map key", rawKey)
+			}
+
 			if result.MapIndex(key).IsValid() {
 				return fmt.Errorf("key %q appears more than once", rawKey)
 			}
@@ -228,7 +238,7 @@ func parseString(target reflect.Value, raw string) error {
 func parseBool(target reflect.Value, raw string) error {
 	parsed, err := strconv.ParseBool(raw)
 	if err != nil {
-		return fmt.Errorf("%q is not a boolean", raw)
+		return makeScalarParseError(err, "%q is not a boolean", raw)
 	}
 
 	target.SetBool(parsed)
@@ -239,7 +249,7 @@ func parseBool(target reflect.Value, raw string) error {
 func parseInt(target reflect.Value, raw string) error {
 	parsed, err := strconv.ParseInt(raw, 10, target.Type().Bits())
 	if err != nil {
-		return fmt.Errorf("%q is not %s", raw, target.Type())
+		return makeScalarParseError(err, "%q is not %s", raw, target.Type())
 	}
 
 	target.SetInt(parsed)
@@ -250,7 +260,7 @@ func parseInt(target reflect.Value, raw string) error {
 func parseUint(target reflect.Value, raw string) error {
 	parsed, err := strconv.ParseUint(raw, 10, target.Type().Bits())
 	if err != nil {
-		return fmt.Errorf("%q is not %s", raw, target.Type())
+		return makeScalarParseError(err, "%q is not %s", raw, target.Type())
 	}
 
 	target.SetUint(parsed)
@@ -261,7 +271,7 @@ func parseUint(target reflect.Value, raw string) error {
 func parseFloat(target reflect.Value, raw string) error {
 	parsed, err := strconv.ParseFloat(raw, target.Type().Bits())
 	if err != nil {
-		return fmt.Errorf("%q is not %s", raw, target.Type())
+		return makeScalarParseError(err, "%q is not %s", raw, target.Type())
 	}
 
 	target.SetFloat(parsed)
@@ -272,7 +282,7 @@ func parseFloat(target reflect.Value, raw string) error {
 func parseDuration(target reflect.Value, raw string) error {
 	parsed, err := time.ParseDuration(raw)
 	if err != nil {
-		return fmt.Errorf("%q is not a duration such as \"30s\" or \"5m\"", raw)
+		return makeScalarParseError(err, "%q is not a duration such as \"30s\" or \"5m\"", raw)
 	}
 
 	target.SetInt(int64(parsed))
@@ -308,14 +318,22 @@ func checkUntrimmed(part, kind string) error {
 	return nil
 }
 
+// addressableValue preserves addressable values and copies others so pointer-
+// receiver marshalers can be called, including for map entries.
+func addressableValue(value reflect.Value) reflect.Value {
+	if value.CanAddr() {
+		return value
+	}
+
+	addressable := reflect.New(value.Type()).Elem()
+	addressable.Set(value)
+	return addressable
+}
+
 // textOf uses the same pointer method set as the parser. Map entries need an
 // addressable copy to expose pointer-receiver MarshalText methods.
 func textOf(value reflect.Value) (string, bool, error) {
-	if !value.CanAddr() {
-		copy := reflect.New(value.Type()).Elem()
-		copy.Set(value)
-		value = copy
-	}
+	value = addressableValue(value)
 
 	if marshaler, ok := reflect.TypeAssert[encoding.TextMarshaler](value.Addr()); ok {
 		text, err := marshaler.MarshalText()
@@ -369,7 +387,7 @@ func renderValue(value reflect.Value, separator, keyValSeparator string) (string
 				return "", fmt.Errorf("element %d: %w", i, err)
 			}
 
-			if value.Index(i).Kind() == reflect.Pointer && value.Index(i).IsNil() {
+			if hasNilPointer(value.Index(i)) {
 				return "", fmt.Errorf("element %d: a nil pointer cannot be represented in an ENV collection", i)
 			}
 		}
@@ -380,6 +398,20 @@ func renderValue(value reflect.Value, separator, keyValSeparator string) (string
 	default:
 		return "", fmt.Errorf("%s has no ENV text representation", value.Type())
 	}
+}
+
+// hasNilPointer checks every pointer in a collection element's chain. ENV
+// parsing allocates the entire chain, so an inner nil cannot round-trip either.
+func hasNilPointer(value reflect.Value) bool {
+	for value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return true
+		}
+
+		value = value.Elem()
+	}
+
+	return false
 }
 
 // joinParts also detects separators overlapping element boundaries, including
@@ -399,7 +431,7 @@ func renderMap(value reflect.Value, separator, keyValSeparator string) (string, 
 	iter := value.MapRange()
 	for iter.Next() {
 		key, item := iter.Key(), iter.Value()
-		if (key.Kind() == reflect.Pointer && key.IsNil()) || (item.Kind() == reflect.Pointer && item.IsNil()) {
+		if hasNilPointer(key) || hasNilPointer(item) {
 			return "", errors.New("a nil pointer cannot be represented in an ENV map")
 		}
 

@@ -7,6 +7,30 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-01
+
+- Reject non-reflexive plain ENV map keys, including NaN and custom keys
+  containing NaN, as parse errors while preserving NaN values.
+
+- Reject cyclic pointer chains, nested ENV configs hidden behind multiple
+  pointer or collection layers, and pointer keys in plain ENV maps at registration.
+
+- **Breaking:** `Load`, `Loader.Register` and `Manifest` require an explicit
+  instance name. Removed `WithName`, `ConfigNamer` and the `ConfigName()` fallback;
+  `WithPrefix` still overrides only the ENV prefix. Renamed `Loader.Add` to
+  `Loader.Register`.
+- Added `Loader.Manifest()`, `ConfigManifest` and `envDescription` for complete
+  configuration metadata without reading ENV or changing loader state.
+- Added `.env.example`, versioned JSON and Markdown exports through `io.Writer`,
+  with secret defaults omitted and strict manifest validation before writing.
+- Added structured diagnostics (`ConfigError`, `ErrorKind`, `ConfigErrors`) and
+  preserved standard scalar parser causes without changing messages or exposing
+  secret parse causes.
+- Fixed default rendering to reject nil pointers at any depth in plain ENV
+  collection elements and map keys or values.
+- Simplified internal codecs, typed handle storage and shared helpers; refreshed
+  naming, examples and GoDoc for the explicit-name API.
+
 ## [0.7.0] - 2026-09-20
 
 - **Breaking:** the Fx adapter now lives in `github.com/uchaloop/confx`.
@@ -325,8 +349,9 @@ its only dependencies.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-`[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.7.0...HEAD
-`[0.6.2]: https://github.com/uchaloop/confmaker/compare/v0.5.0...v0.6.2
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/uchaloop/confmaker/compare/v0.7.0...v0.8.0
+[0.6.2]: https://github.com/uchaloop/confmaker/compare/v0.5.0...v0.6.2
 [0.5.0]: https://github.com/uchaloop/confmaker/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/uchaloop/confmaker/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/uchaloop/confmaker/compare/v0.4.0...v0.4.1
