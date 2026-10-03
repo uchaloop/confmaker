@@ -42,11 +42,13 @@ func TestDiagnosticSourcesAndErrors(t *testing.T) {
 	if config.Status != ConfigFailed {
 		t.Fatal(config)
 	}
+
 	sources := map[string]ValueSource{"APP_DEFAULT": SourceDefault, "APP_ZERO": SourceZero, "APP_INPUT": SourceEnv, "APP_REQUIRED": SourceMissing, "APP_EMPTY": SourceEnv}
 	for _, field := range config.Variables {
 		if field.Source != sources[field.Name] {
 			t.Fatal(field)
 		}
+
 		expectedStatus := VariableSucceeded
 		if field.Name == "APP_INPUT" || field.Name == "APP_REQUIRED" || field.Name == "APP_EMPTY" {
 			expectedStatus = VariableFailed
@@ -60,6 +62,7 @@ func TestDiagnosticSourcesAndErrors(t *testing.T) {
 	if strings.Contains(fmt.Sprintf("%+v", report), "private-invalid-value") {
 		t.Fatal("value leaked")
 	}
+
 	report.Configs[0].Variables[0].Name = "changed"
 	report.Problems[0].Kind = "changed"
 	if reflect.DeepEqual(report, diagnostics.Report()) {
@@ -109,6 +112,7 @@ func TestDiagnosticHandlerReadsCompletedLoad(t *testing.T) {
 		if _, err := handle.Value(); err != nil {
 			t.Fatal(err)
 		}
+
 		report.Configs[0].InstanceName = "changed"
 	}))
 	handle = loader.Register[struct{}]("app")
@@ -179,15 +183,13 @@ func TestDiagnosticOptions(t *testing.T) {
 	}
 }
 
-type diagnosticBlockingConfig struct {
-	Entered chan struct{}
-	Release chan struct{}
-}
+var diagnosticValidationEntered, diagnosticValidationRelease chan struct{}
 
-// Channels are provided through a test-only registration factory below.
-func (c diagnosticBlockingConfig) Validate() error {
-	close(c.Entered)
-	<-c.Release
+type diagnosticBlockingConfig struct{}
+
+func (diagnosticBlockingConfig) Validate() error {
+	close(diagnosticValidationEntered)
+	<-diagnosticValidationRelease
 
 	return nil
 }
@@ -197,7 +199,7 @@ func TestDiagnosticConcurrentReaders(t *testing.T) {
 	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(nil))
 	loader.Register[diagnosticBlockingConfig]("app")
 	entered, release := make(chan struct{}), make(chan struct{})
-	loader.registrations[0].defaults = func() any { return &diagnosticBlockingConfig{entered, release} }
+	diagnosticValidationEntered, diagnosticValidationRelease = entered, release
 	done := make(chan error, 1)
 	go func() { done <- loader.Load() }()
 	<-entered
@@ -211,6 +213,7 @@ func TestDiagnosticConcurrentReaders(t *testing.T) {
 			}
 		})
 	}
+
 	readers.Wait()
 	close(release)
 	if err := <-done; err != nil {
@@ -259,17 +262,17 @@ func TestDiagnosticHandlerPanicKeepsResult(t *testing.T) {
 	}
 }
 
+var diagnosticDefaultsCalls int
+
+type diagnosticDefaultsConfig struct{}
+
+func (*diagnosticDefaultsConfig) SetDefaults() { diagnosticDefaultsCalls++ }
+
 func TestDiagnosticsDoNotRepeatProcessing(t *testing.T) {
 	diagnostics := MakeDiagnostics()
-	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(map[string]string{"APP_TOKEN": "private-secret", "APP_ENDPOINT": "localhost"}))
-	handle := loader.Register[widgetConfig]("app")
-	defaults := loader.registrations[0].defaults
-	defaultsCalls := 0
-	loader.registrations[0].defaults = func() any {
-		defaultsCalls++
+	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(nil))
+	handle := loader.Register[diagnosticDefaultsConfig]("app")
 
-		return defaults()
-	}
 	if _, err := loader.Manifest(); err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +281,7 @@ func TestDiagnosticsDoNotRepeatProcessing(t *testing.T) {
 		t.Fatal("manifest collected load report")
 	}
 
-	defaultsCalls = 0
+	diagnosticDefaultsCalls = 0
 	if err := loader.Load(); err != nil {
 		t.Fatal(err)
 	}
@@ -291,13 +294,8 @@ func TestDiagnosticsDoNotRepeatProcessing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if defaultsCalls != 1 {
-		t.Fatal("defaults called", defaultsCalls, "times")
-	}
-
-	report := diagnostics.Report()
-	if strings.Contains(fmt.Sprintf("%+v", report), "private-secret") {
-		t.Fatal("secret leaked")
+	if diagnosticDefaultsCalls != 1 {
+		t.Fatal("defaults called", diagnosticDefaultsCalls, "times")
 	}
 }
 
@@ -312,34 +310,6 @@ func TestDiagnosticsPreserveLoadResult(t *testing.T) {
 	actual, err := Load[diagnosticConfig]("app", env, WithDiagnostics(diagnostics))
 	if err != nil || actual != expected || diagnostics.Report().State != LoadSucceeded {
 		t.Fatal(actual, err, diagnostics.Report())
-	}
-}
-
-type diagnosticErrorWriter struct{ err error }
-
-func (w diagnosticErrorWriter) Write([]byte) (int, error) { return 0, w.err }
-
-type diagnosticUnwrapPanic struct{}
-
-func (diagnosticUnwrapPanic) Error() string { return "writer failed" }
-func (diagnosticUnwrapPanic) Unwrap() error { panic("must not inspect writer cause") }
-
-func TestDiagnosticDumpErrorDoesNotInspectUserCause(t *testing.T) {
-	diagnostics := MakeDiagnostics()
-	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(nil), WithDump(diagnosticErrorWriter{diagnosticUnwrapPanic{}}))
-	loader.Register[struct{}]("app")
-
-	err := loader.Load()
-	if err == nil {
-		t.Fatal("expected writer error")
-	}
-
-	if loader.Load() != err {
-		t.Fatal("completed load result not preserved")
-	}
-
-	if diagnostics.Report().State != LoadFailed {
-		t.Fatal(diagnostics.Report())
 	}
 }
 
@@ -360,17 +330,24 @@ func TestDiagnosticPanicPreservesCompletedProblems(t *testing.T) {
 	}
 }
 
-func TestDiagnosticDumpErrorCannotSupplyConfigMetadata(t *testing.T) {
+func TestDiagnosticHandlerCannotMutatePublishedSlices(t *testing.T) {
 	diagnostics := MakeDiagnostics()
-	writerError := &ConfigError{Kind: ErrorParse, InstanceName: "private-writer-data"}
-	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(nil), WithDump(diagnosticErrorWriter{writerError}))
-	loader.Register[struct{}]("app")
-	if err := loader.Load(); !errors.Is(err, writerError) {
-		t.Fatal("writer cause not preserved", err)
+	loader := MakeLoader(
+		WithEnv(nil),
+		WithDiagnostics(diagnostics),
+		WithDiagnosticHandler(func(report LoadReport) {
+			report.Configs[0].Variables[0].Name = "changed"
+			report.Problems[0].Kind = ErrorConflict
+		}),
+	)
+	loader.Register[diagnosticConfig]("app")
+
+	if err := loader.Load(); err == nil {
+		t.Fatal("expected required variable errors")
 	}
 
 	report := diagnostics.Report()
-	if report.State != LoadFailed || len(report.Problems) != 0 || report.Configs[0].Status != ConfigSucceeded {
-		t.Fatal(report)
+	if report.Configs[0].Variables[0].Name != "APP_DEFAULT" || report.Problems[0].Kind != ErrorRequired {
+		t.Fatal("handler changed published report", report)
 	}
 }

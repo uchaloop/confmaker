@@ -21,11 +21,13 @@ type nestedRequiredConfig struct {
 
 func checkPointerDeclaration[T any](t *testing.T) {
 	t.Helper()
+
 	variables, err := Manifest[T]("app")
 	problems := ConfigErrors(err)
 	if variables != nil || len(problems) == 0 || problems[0].Kind != ErrorDeclaration || problems[0].InstanceName != "app" {
 		t.Fatalf("expected declaration error, got %v, %v", variables, err)
 	}
+
 	loader := MakeLoader(WithEnv(nil))
 	loader.Register[T]("app")
 	if err := loader.Load(); len(ConfigErrors(err)) == 0 {
@@ -48,25 +50,20 @@ func TestPointerSchemaRestrictions(t *testing.T) {
 }
 
 func TestScalarPointersStillLoad(t *testing.T) {
-	type config struct {
+	cfg, err := Load[struct {
 		Timeout **time.Duration `env:"TIMEOUT"`
-	}
-	cfg, err := Load[config]("app", WithEnv(map[string]string{"APP_TIMEOUT": "3s"}))
+	}]("app", WithEnv(map[string]string{"APP_TIMEOUT": "3s"}))
 	if err != nil || cfg.Timeout == nil || *cfg.Timeout == nil || **cfg.Timeout != 3*time.Second {
 		t.Fatalf("scalar pointers: %+v, %v", cfg, err)
 	}
 }
 
-func TestRecursiveJSONStructStillLoads(t *testing.T) {
+func TestRecursiveJSONStructIsRejected(t *testing.T) {
 	type node struct {
 		Value int
 		Next  *node
 	}
-	type config struct {
+	checkPointerDeclaration[struct {
 		Root node `env:"ROOT" envFormat:"json"`
-	}
-	cfg, err := Load[config]("app", WithEnv(map[string]string{"APP_ROOT": `{"Value":1,"Next":{"Value":2}}`}))
-	if err != nil || cfg.Root.Next == nil || cfg.Root.Next.Value != 2 {
-		t.Fatalf("recursive JSON: %+v, %v", cfg, err)
-	}
+	}](t)
 }

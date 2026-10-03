@@ -137,31 +137,6 @@ func TestManifestRejectsAmbiguousDefaultWithContext(t *testing.T) {
 	}
 }
 
-func TestDumpEscapesControlsAndMasksSecrets(t *testing.T) {
-	env := environment{
-		"CONFXDUMP_VALUE":  "first\nsecond\t\x1b[31m",
-		"CONFXDUMP_SECRET": "never print this\n",
-	}
-
-	var out bytes.Buffer
-	err := writeDump(&out, []dumpSection{{instanceName: "dump", variables: []Variable{
-		{Name: "CONFXDUMP_VALUE", Type: "string"},
-		{Name: "CONFXDUMP_SECRET", Type: "secret.Secret", Secret: true},
-	}}}, env)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	text := out.String()
-	if strings.Count(text, "\n") != 3 || strings.Contains(text, "never print") || strings.Contains(text, "\x1b") {
-		t.Fatalf("unsafe dump: %q", text)
-	}
-
-	if !strings.Contains(text, `first\nsecond\t\x1b[31m`) {
-		t.Fatalf("controls not visible: %q", text)
-	}
-}
-
 type encodeOnlyInt int
 
 func (encodeOnlyInt) MarshalText() ([]byte, error) { return []byte("not an integer"), nil }
@@ -174,11 +149,9 @@ func TestMarshalOnlyScalarUsesItsParserSyntax(t *testing.T) {
 }
 
 func TestManifestRequiresEncoderForCustomDecoder(t *testing.T) {
-	type cfg struct {
+	if _, err := Manifest[struct {
 		Value countedByte `env:"VALUE"`
-	}
-
-	if _, err := Manifest[cfg]("confxrender"); err == nil || !strings.Contains(err.Error(), "TextMarshaler") {
+	}]("confxrender"); err == nil || !strings.Contains(err.Error(), "TextMarshaler") {
 		t.Fatalf("missing encoder: %v", err)
 	}
 }
@@ -196,12 +169,10 @@ func TestDuplicateEncodedMapKeysAreRejected(t *testing.T) {
 }
 
 func TestManifestAggregatesMarshalErrors(t *testing.T) {
-	type cfg struct {
+	_, err := Manifest[struct {
 		First  brokenText `env:"FIRST"`
 		Second brokenText `env:"SECOND"`
-	}
-
-	_, err := Manifest[cfg]("confxrender")
+	}]("confxrender")
 	if err == nil || !errors.Is(err, errMarshalDefault) || !strings.Contains(err.Error(), "field First") || !strings.Contains(err.Error(), "field Second") {
 		t.Fatalf("marshal errors not aggregated: %v", err)
 	}
@@ -255,32 +226,6 @@ func TestDefaultsRenderForCollections(t *testing.T) {
 	}
 }
 
-// TestDumpReportsWhereAValueComesFrom covers the branches of the source column
-// that a set variable never reaches.
-func TestDumpReportsWhereAValueComesFrom(t *testing.T) {
-	t.Parallel()
-
-	type config struct {
-		Host    string `env:"HOST,required"`
-		Timeout string `env:"TIMEOUT"`
-		Spare   string `env:"SPARE"`
-	}
-
-	var out bytes.Buffer
-
-	// Host is required and unset, Timeout has a default, Spare has neither.
-	if _, err := Load[config]("confxapp", WithDump(&out), WithEnv(nil)); err == nil {
-		t.Fatal("expected the required variable to fail the load")
-	}
-
-	dump := out.String()
-	for _, want := range []string{"required", "zero value"} {
-		if !strings.Contains(dump, want) {
-			t.Errorf("dump is missing the %q source:\n%s", want, dump)
-		}
-	}
-}
-
 func TestCollectionDefaultsRejectNestedNilPointers(t *testing.T) {
 	var inner *string
 	middle := &inner
@@ -316,19 +261,23 @@ func TestNestedNilDefaultsLoadButCannotBeDescribed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(cfg.Items) != 2 || cfg.Items[0] == nil || *cfg.Items[0] != nil || cfg.Values["key"] == nil || *cfg.Values["key"] != nil {
 		t.Fatal("loading changed nested nil defaults")
 	}
+
 	variables, err := Manifest[nestedNilDefaultConfig]("app")
 	problems := ConfigErrors(err)
 	if variables != nil || len(problems) != 2 {
 		t.Fatalf("manifest: %v, %v", variables, err)
 	}
+
 	for _, problem := range problems {
 		if problem.Kind != ErrorDefaultRender || problem.InstanceName != "app" {
 			t.Fatalf("context: %#v", problem)
 		}
 	}
+
 	loader := MakeLoader(WithEnv(nil))
 	loader.Register[nestedNilDefaultConfig]("app")
 	for name, write := range map[string]func(*bytes.Buffer) error{
@@ -343,6 +292,7 @@ func TestNestedNilDefaultsLoadButCannotBeDescribed(t *testing.T) {
 			}
 		})
 	}
+
 	if err := loader.Load(); err != nil {
 		t.Fatalf("export failure affected loading: %v", err)
 	}
@@ -363,14 +313,17 @@ func TestCollectionDefaultsWithNonNilPointerChainsRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		parse, err := fieldParser(source.Type(), ",", ":")
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		target := reflect.New(source.Type()).Elem()
 		if err := parse(target, raw); err != nil {
 			t.Fatal(err)
 		}
+
 		if !reflect.DeepEqual(collection, target.Interface()) {
 			t.Fatalf("round-trip changed %v", collection)
 		}

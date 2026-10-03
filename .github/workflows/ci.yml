@@ -9,15 +9,22 @@ on:
   pull_request:
     branches:
       - main
+      - 'release/**'
 
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       GOWORK: "off"
 
@@ -38,8 +45,8 @@ jobs:
             exit 1
           fi
 
-      - name: Download dependencies
-        run: go mod download all
+      - name: Check module dependencies
+        run: go mod tidy -diff
 
       - name: Vet
         run: go vet ./...

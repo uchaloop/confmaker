@@ -1,7 +1,6 @@
 package confmaker
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -45,7 +44,7 @@ func manifested[T any](t *testing.T, name string, opts ...ConfigOption) []Variab
 func bindError[T any](t *testing.T) error {
 	t.Helper()
 
-	if _, _, err := prepareConfig[T]("confxapp", nil); err != nil {
+	if _, err := Manifest[T]("confxapp"); err != nil {
 		return err
 	}
 
@@ -112,13 +111,6 @@ func TestManifestReportsFieldMetadata(t *testing.T) {
 }
 
 func TestManifestSeparatesRequireFromNotEmpty(t *testing.T) {
-	type config struct {
-		Optional string `env:"OPTIONAL"`
-		Require  string `env:"REQUIRE,required"`
-		NotEmpty string `env:"NOT_EMPTY,notEmpty"`
-		Both     string `env:"BOTH,required,notEmpty"`
-	}
-
 	want := map[string][2]bool{
 		"CONFXAPP_OPTIONAL":  {false, false},
 		"CONFXAPP_REQUIRE":   {true, false},
@@ -126,7 +118,12 @@ func TestManifestSeparatesRequireFromNotEmpty(t *testing.T) {
 		"CONFXAPP_BOTH":      {true, true},
 	}
 
-	for _, variable := range manifested[config](t, "confxapp") {
+	for _, variable := range manifested[struct {
+		Optional string `env:"OPTIONAL"`
+		Require  string `env:"REQUIRE,required"`
+		NotEmpty string `env:"NOT_EMPTY,notEmpty"`
+		Both     string `env:"BOTH,required,notEmpty"`
+	}](t, "confxapp") {
 		if got := [2]bool{variable.Required, variable.NotEmpty}; got != want[variable.Name] {
 			t.Errorf("%s: Required, NotEmpty = %v, want %v", variable.Name, got, want[variable.Name])
 		}
@@ -183,13 +180,11 @@ func TestManifestRendersEnvExample(t *testing.T) {
 }
 
 func TestManifestOmitsSecretValueFromDefault(t *testing.T) {
-	type config struct {
-		Password secret.Secret `env:"PASSWORD"`
-	}
-
 	// A default that is a secret still renders through the type's own text form,
 	// which is a mask.
-	variables := manifested[config](t, "confxapp")
+	variables := manifested[struct {
+		Password secret.Secret `env:"PASSWORD"`
+	}](t, "confxapp")
 	if strings.Contains(variables[0].Default, "s3cr3t") {
 		t.Fatalf("a secret leaked into the manifest: %q", variables[0].Default)
 	}
@@ -206,22 +201,20 @@ type unexportedEmbedded struct {
 	Ignored string `env:"IGNORED"`
 }
 
-func TestBindWalksNestedAndEmbedded(t *testing.T) {
+func TestManifestListsNestedAndEmbeddedFields(t *testing.T) {
 	type pool struct {
 		MaxConns int `env:"MAX_CONNS"`
 	}
 
-	type config struct {
+	got := make(map[string]Variable)
+	for _, variable := range manifested[struct {
 		Embedded
 		unexportedEmbedded
 		Host    string        `env:"HOST"`
 		Pool    pool          `envPrefix:"POOL_"`
 		Pass    secret.Secret `env:"PASSWORD,notEmpty"`
 		Skipped string
-	}
-
-	got := make(map[string]Variable)
-	for _, variable := range manifested[config](t, "confxapp") {
+	}](t, "confxapp") {
 		got[variable.Name] = variable
 	}
 
@@ -240,9 +233,7 @@ func TestBindWalksNestedAndEmbedded(t *testing.T) {
 	}
 }
 
-// TestBindFillsWhatItDescribes is the property the single traversal exists for:
-// the variables a config reports are exactly the variables that fill it.
-func TestBindFillsWhatItDescribes(t *testing.T) {
+func TestLoadUsesManifestVariables(t *testing.T) {
 	t.Parallel()
 
 	type pool struct {
@@ -265,14 +256,7 @@ func TestBindFillsWhatItDescribes(t *testing.T) {
 	env["CONFXAPP_SHARED"] = "shared"
 	env["CONFXAPP_IGNORED"] = "ignored"
 
-	// Binding alone: Load would also report the variables no field reads.
-	fields, err := compileSchema(reflect.TypeFor[config](), "CONFXAPP_")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var parsed config
-	err = applyAndValidate(&parsed, fields, "confxapp", env, nil)
+	parsed, err := Load[config]("confxapp", WithEnv(env), AllowUnknown("CONFXAPP_IGNORED"))
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
@@ -286,7 +270,7 @@ func TestBindFillsWhatItDescribes(t *testing.T) {
 	}
 }
 
-func TestBindSkipsIgnoredField(t *testing.T) {
+func TestLoadSkipsIgnoredFields(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
@@ -303,14 +287,7 @@ func TestBindSkipsIgnoredField(t *testing.T) {
 		Hidden pool   `env:"-" envPrefix:"HIDDEN_"`
 	}
 
-	// Binding alone: Load would also report the variables no field reads.
-	fields, err := compileSchema(reflect.TypeFor[config](), "CONFXAPP_")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var parsed config
-	err = applyAndValidate(&parsed, fields, "confxapp", env, nil)
+	parsed, err := Load[config]("confxapp", WithEnv(env), AllowUnknown("CONFXAPP_HIDDEN_"))
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
@@ -325,11 +302,9 @@ func TestBindSkipsIgnoredField(t *testing.T) {
 }
 
 func TestBindRejectsEnvDefault(t *testing.T) {
-	type config struct {
+	err := bindError[struct {
 		Timeout time.Duration `env:"TIMEOUT" envDefault:"30s"`
-	}
-
-	err := bindError[config](t)
+	}](t)
 	if !strings.Contains(err.Error(), "SetDefaults") {
 		t.Fatalf("the error does not point at the replacement: %v", err)
 	}
@@ -346,12 +321,10 @@ func TestBindReportsEveryProblemAtOnce(t *testing.T) {
 		MaxConns int `env:"MAX_CONNS"`
 	}
 
-	type config struct {
+	err := bindError[struct {
 		Timeout time.Duration `env:"TIMEOUT" envDefault:"30s"`
 		Pool    *pool         `envPrefix:"POOL_"`
-	}
-
-	err := bindError[config](t)
+	}](t)
 	if !strings.Contains(err.Error(), "SetDefaults") || !strings.Contains(err.Error(), "nest by value") {
 		t.Fatalf("only one of two problems was reported: %v", err)
 	}

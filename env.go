@@ -7,8 +7,8 @@ import (
 )
 
 // environment is the set of variables one load reads. It is taken once, at the
-// start of Load, and shared by loading, the unknown-variable check and the dump,
-// so all three see the same values whatever changes the process environment
+// start of Load, and shared by loading and the unknown-variable check,
+// so both see the same values whatever changes the process environment
 // meanwhile. It is never modified after it is taken.
 type environment map[string]string
 

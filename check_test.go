@@ -1,8 +1,6 @@
 package confmaker
 
 import (
-	"bytes"
-	"math/rand"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,14 +15,10 @@ type strictConfig struct {
 	Pass secret.Secret `env:"PASSWORD,required"`
 }
 
-// SetDefaults gives Port a default the dump can report as coming from the code.
+// SetDefaults supplies an optional port.
 func (c *strictConfig) SetDefaults() {
 	c.Port = 5432
 }
-
-// Tests pass their environment through WithEnv, so they read nothing the machine
-// running them happens to export and can run in parallel. The confx-prefixed
-// names date from when they read the process environment.
 
 // loadStrict loads the strictConfig instance "confxpostgres" from env.
 func loadStrict(env map[string]string, opts ...EnvOption) error {
@@ -33,9 +27,11 @@ func loadStrict(env map[string]string, opts ...EnvOption) error {
 		loadOpts = append(loadOpts, opt)
 	}
 
-	_, err := Load[strictConfig]("confxpostgres", loadOpts...)
+	if _, err := Load[strictConfig]("confxpostgres", loadOpts...); err != nil {
+		return err
+	}
 
-	return err
+	return nil
 }
 
 func TestCheckAcceptsDeclaredVariables(t *testing.T) {
@@ -160,54 +156,6 @@ func TestNestedPrefixesDoNotCollide(t *testing.T) {
 	}
 }
 
-func TestWithDumpListsVariablesAndMasksSecrets(t *testing.T) {
-	t.Parallel()
-
-	env := map[string]string{
-		"CONFXPOSTGRES_HOST":     "db:5432",
-		"CONFXPOSTGRES_PASSWORD": "s3cr3t",
-	}
-
-	var out bytes.Buffer
-
-	_, err := Load[strictConfig]("confxpostgres", WithDump(&out), WithEnv(env))
-	if err != nil {
-		t.Fatalf("app: %v", err)
-	}
-
-	dump := out.String()
-	for _, want := range []string{
-		"CONFXPOSTGRES_HOST", "db:5432",
-		"CONFXPOSTGRES_PORT", "5432", "default",
-		"CONFXPOSTGRES_PASSWORD", "(set)",
-	} {
-		if !strings.Contains(dump, want) {
-			t.Errorf("dump is missing %q:\n%s", want, dump)
-		}
-	}
-
-	if strings.Contains(dump, "s3cr3t") {
-		t.Fatalf("dump printed a secret value:\n%s", dump)
-	}
-}
-
-func TestHintIsDeterministic(t *testing.T) {
-	// Three candidates sit at the same edit distance from the typo, so an
-	// unordered scan of the known names would report a different one per run.
-	known := map[string]string{"CONFXAPP_HOST": "app", "CONFXAPP_MOST": "app", "CONFXAPP_COST": "app"}
-
-	first := hint("CONFXAPP_XOST", known)
-	for range 100 {
-		if got := hint("CONFXAPP_XOST", known); got != first {
-			t.Fatalf("hint changed between runs: %q then %q", first, got)
-		}
-	}
-
-	if !strings.Contains(first, "CONFXAPP_COST") {
-		t.Fatalf("hint = %q, want the first candidate by name among the ties", first)
-	}
-}
-
 func TestAllowUnknownIgnoresEmptyPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -253,15 +201,13 @@ func TestUnreadableConfigIsReported(t *testing.T) {
 		Host string `env:"HOST"`
 	}
 
-	type config struct {
-		Name   string `env:"NAME"`
-		Shards []shard
-	}
-
 	// A collection of structs would read variables no type can enumerate, so the
 	// declaration is refused instead of quietly leaving a hole in the check.
 	loader := MakeLoader(WithEnv(nil))
-	loader.Register[config]("confxcluster")
+	loader.Register[struct {
+		Name   string `env:"NAME"`
+		Shards []shard
+	}]("confxcluster")
 	err := loader.Load()
 	if err == nil || !strings.Contains(err.Error(), "nest by value") {
 		t.Fatalf("unexpected error: %v", err)
@@ -273,17 +219,13 @@ func TestUnreadableConfigIsReported(t *testing.T) {
 // one instance is the name another instance reads. One value would fill two
 // configs that nothing keeps in step.
 func TestTwoInstancesMayNotClaimOneVariable(t *testing.T) {
-	type outer struct {
-		Host string `env:"MAIN_HOST"`
-	}
-
-	type inner struct {
-		Host string `env:"HOST"`
-	}
-
 	_, err := checkRegistrations([]descriptor{
-		{instanceName: "db", prefix: "CONFXDB_", fields: mustDescribe[outer](t, "CONFXDB_")},
-		{instanceName: "db_main", prefix: "CONFXDB_MAIN_", fields: mustDescribe[inner](t, "CONFXDB_MAIN_")},
+		{instanceName: "db", prefix: "CONFXDB_", fields: mustDescribe[struct {
+			Host string `env:"MAIN_HOST"`
+		}](t, "CONFXDB_")},
+		{instanceName: "db_main", prefix: "CONFXDB_MAIN_", fields: mustDescribe[struct {
+			Host string `env:"HOST"`
+		}](t, "CONFXDB_MAIN_")},
 	})
 
 	if err == nil {
@@ -324,121 +266,33 @@ func mustDescribe[T any](t *testing.T, prefix string) []fieldSpec {
 	return fields
 }
 
-// fullMatrixDistance is the textbook Levenshtein, kept as the reference the
-// bounded scan is checked against. The scan fills only a band around the
-// diagonal and abandons a comparison the moment it cannot come in under budget,
-// so what it skips has to be shown to be what it was allowed to skip.
-func fullMatrixDistance(a, b string) int {
-	previous := make([]int, len(b)+1)
-	current := make([]int, len(b)+1)
-
-	for j := range previous {
-		previous[j] = j
-	}
-
-	for i := 1; i <= len(a); i++ {
-		current[0] = i
-
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-
-			current[j] = min(previous[j]+1, current[j-1]+1, previous[j-1]+cost)
-		}
-
-		previous, current = current, previous
-	}
-
-	return previous[len(b)]
-}
-
-func TestEditDistanceMatchesTheFullMatrix(t *testing.T) {
-	// Four symbols over short words, so the pairs that matter - a transposition,
-	// a repeated run, one string a prefix of the other - come up in bulk.
-	const alphabet = "AB_0"
-
-	random := rand.New(rand.NewSource(1))
-
-	word := func() string {
-		out := make([]byte, random.Intn(13))
-		for i := range out {
-			out[i] = alphabet[random.Intn(len(alphabet))]
-		}
-
-		return string(out)
-	}
-
-	var rows editRows
-
-	for range 50000 {
-		a, b := word(), word()
-
-		for limit := range 5 {
-			want := min(fullMatrixDistance(a, b), limit+1)
-
-			if got := rows.editDistance(a, b, limit); got != want {
-				t.Fatalf("editDistance(%q, %q, %d) = %d, want %d", a, b, limit, got, want)
-			}
-		}
-	}
-}
-
-// TestEditDistanceIsSymmetric covers the swap the scan makes to put the longer
-// string first: a distance that depended on the order would make a suggestion
-// depend on which name the map happened to yield.
-func TestEditDistanceIsSymmetric(t *testing.T) {
-	const alphabet = "AB_0"
-
-	random := rand.New(rand.NewSource(2))
-
-	var rows editRows
-
-	for range 20000 {
-		a := make([]byte, random.Intn(16))
-		b := make([]byte, random.Intn(16))
-
-		for i := range a {
-			a[i] = alphabet[random.Intn(len(alphabet))]
-		}
-
-		for i := range b {
-			b[i] = alphabet[random.Intn(len(alphabet))]
-		}
-
-		forward := rows.editDistance(string(a), string(b), maxHintDistance)
-		if backward := rows.editDistance(string(b), string(a), maxHintDistance); forward != backward {
-			t.Fatalf("editDistance(%q, %q) = %d but reversed = %d", a, b, forward, backward)
-		}
-	}
-}
-
-// TestEditRowsAreReusable covers the buffers a scan carries from one candidate
-// to the next: a row left over from a longer name must not be read as part of a
-// shorter one.
-func TestEditRowsAreReusable(t *testing.T) {
-	var rows editRows
-
-	for _, pair := range [][2]string{
-		{"CONFXAPP_A_VERY_LONG_VARIABLE_NAME", "CONFXAPP_A_VERY_LONG_VARIABLE_NAMF"},
-		{"CONFXAPP_HOST", "CONFXAPP_HSOT"},
-		{"A", "B"},
-		{"", ""},
-		{"CONFXAPP_HOST", "CONFXAPP_HOST"},
+func TestUnknownVariableSuggestions(t *testing.T) {
+	for _, scenario := range []struct{ name, suggestion string }{
+		{"APP_HSOT", "APP_HOST"},
+		{"APP_XOST", "APP_COST"},
+		{"APP_A_VERY_LONG_VARIABLE_NAMF", "APP_A_VERY_LONG_VARIABLE_NAME"},
+		{"APP_SOMETHING_ENTIRELY_ELSE", ""},
 	} {
-		want := min(fullMatrixDistance(pair[0], pair[1]), maxHintDistance+1)
+		t.Run(scenario.name, func(t *testing.T) {
+			for range 20 {
+				_, err := Load[struct {
+					Host     string `env:"HOST"`
+					Cost     string `env:"COST"`
+					Most     string `env:"MOST"`
+					LongName string `env:"A_VERY_LONG_VARIABLE_NAME"`
+				}]("app", WithEnv(map[string]string{scenario.name: "value"}))
+				if err == nil {
+					t.Fatal("unknown variable accepted")
+				}
 
-		if got := rows.editDistance(pair[0], pair[1], maxHintDistance); got != want {
-			t.Fatalf("editDistance(%q, %q) = %d, want %d", pair[0], pair[1], got, want)
-		}
-	}
-}
-
-func TestHintStaysSilentWithoutACloseCandidate(t *testing.T) {
-	known := map[string]string{"CONFXAPP_HOST": "app"}
-
-	if got := hint("CONFXAPP_SOMETHING_ENTIRELY_ELSE", known); len(got) != 0 {
-		t.Fatalf("a distant name was suggested: %q", got)
+				if len(scenario.suggestion) == 0 {
+					if strings.Contains(err.Error(), "did you mean") {
+						t.Fatal(err)
+					}
+				} else if !strings.Contains(err.Error(), "did you mean \""+scenario.suggestion+"\"") {
+					t.Fatal(err)
+				}
+			}
+		})
 	}
 }

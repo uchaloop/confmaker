@@ -73,9 +73,13 @@ func (l *Loader) WriteManifestJSON(writer io.Writer) error {
 
 	data = append(data, '\n')
 	n, err := writer.Write(data)
-	if err == nil && n != len(data) {
+	if err != nil {
+		return err
+	}
+
+	if n != len(data) {
 		return io.ErrShortWrite
 	}
 
-	return err
+	return nil
 }

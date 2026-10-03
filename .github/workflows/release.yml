@@ -8,19 +8,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  pkg-go-dev:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger pkg.go.dev to index the release
-        env:
-          MODULE: github.com/uchaloop/confmaker
-        run: |
-          version="${GITHUB_REF_NAME}"
-          curl -fsS "https://proxy.golang.org/${MODULE}/@v/${version}.info"
+  checks:
+    uses: ./.github/workflows/ci.yml
 
   release:
+    needs: checks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -30,12 +29,23 @@ jobs:
           # comparison link.
           fetch-depth: 0
 
+      - name: Validate the module version tag
+        run: |
+          # This module has no /vN suffix, so releases use major version 0 or 1.
+          number='(0|[1-9][0-9]*)'
+          identifier="($number|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+          pattern="^v(0|1)\.$number\.$number(-$identifier(\.$identifier)*)?$"
+          if [[ ! "$GITHUB_REF_NAME" =~ $pattern ]]; then
+            echo "Invalid module version tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
       - name: Take the release notes from the changelog
         run: |
           version="${GITHUB_REF_NAME#v}"
 
           awk -v v="$version" '
-            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            $1 == "##" && $2 == "[" v "]" { found = 1; next }
             found && /^## / { exit }
             found
           ' CHANGELOG.md > notes.md
@@ -61,10 +71,23 @@ jobs:
         run: |
           args=(--title "${GITHUB_REF_NAME}" --notes-file notes.md --verify-tag)
 
-          # Everything before 1.0 is published as a pre-release: the API is still
-          # allowed to break between minors.
+          # GitHub prerelease status follows the version's prerelease suffix.
           case "${GITHUB_REF_NAME}" in
-            v0.*) args+=(--prerelease) ;;
+            v*-*) args+=(--prerelease --latest=false) ;;
           esac
 
           gh release create "${GITHUB_REF_NAME}" "${args[@]}"
+
+  go-proxy:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request the released version from the Go proxy
+        env:
+          MODULE: github.com/uchaloop/confmaker
+        run: |
+          curl --fail --show-error --silent \
+            --retry 4 --retry-all-errors --retry-delay 5 --retry-max-time 180 \
+            --connect-timeout 10 --max-time 30 \
+            "https://proxy.golang.org/${MODULE}/@v/${GITHUB_REF_NAME}.info"

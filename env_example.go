@@ -29,8 +29,10 @@ func (l *Loader) WriteEnvExample(writer io.Writer) error {
 	var output strings.Builder
 	for _, config := range manifest {
 		fmt.Fprintf(&output, "# Configuration: %q\n", config.InstanceName)
+
 		for _, variable := range config.Variables {
 			writeExampleComment(&output, variable.Description)
+
 			if variable.Required {
 				if variable.NotEmpty {
 					output.WriteString("# Required; must not be empty.\n")
@@ -38,6 +40,7 @@ func (l *Loader) WriteEnvExample(writer io.Writer) error {
 					output.WriteString("# Required.\n")
 				}
 			}
+
 			if variable.Secret {
 				output.WriteString("# Secret; supply your own value.\n")
 			}
@@ -56,17 +59,22 @@ func (l *Loader) WriteEnvExample(writer io.Writer) error {
 	}
 
 	n, err := io.WriteString(writer, output.String())
-	if err == nil && n != output.Len() {
+	if err != nil {
+		return err
+	}
+
+	if n != output.Len() {
 		return io.ErrShortWrite
 	}
 
-	return err
+	return nil
 }
 
 func writeExampleComment(output *strings.Builder, description string) {
 	if len(description) == 0 {
 		return
 	}
+
 	description = strings.ReplaceAll(description, "\r\n", "\n")
 	description = strings.ReplaceAll(description, "\r", "\n")
 	for _, line := range strings.Split(description, "\n") {
@@ -74,9 +82,11 @@ func writeExampleComment(output *strings.Builder, description string) {
 		for _, char := range line {
 			if char < 32 || char == 127 || char == '\u2028' || char == '\u2029' {
 				fmt.Fprintf(output, "\\u%04x", char)
-			} else {
-				output.WriteRune(char)
+
+				continue
 			}
+
+			output.WriteRune(char)
 		}
 
 		output.WriteByte('\n')

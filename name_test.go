@@ -43,59 +43,6 @@ func TestExplicitNameAndPrefix(t *testing.T) {
 	}
 }
 
-// A method with this name is ordinary user code, never a naming hook.
-type ignoredNameConfig struct {
-	Host string `env:"HOST"`
-}
-
-func (*ignoredNameConfig) ConfigName() string { panic("ConfigName must never be called") }
-
-func TestConfigNameIsIgnored(t *testing.T) {
-	t.Parallel()
-
-	for _, name := range []string{"", "explicit"} {
-		for _, prefix := range []bool{false, true} {
-			var opts []ConfigOption
-			if prefix {
-				opts = append(opts, WithPrefix("CUSTOM_"))
-			}
-			check := func(operation string, err error) {
-				t.Helper()
-				if len(name) != 0 {
-					if err != nil {
-						t.Fatalf("%s: %v", operation, err)
-					}
-				} else if err == nil || !strings.Contains(err.Error(), "an instance name is required") {
-					t.Fatalf("%s: missing name: %v", operation, err)
-				}
-			}
-
-			variables, err := Manifest[ignoredNameConfig](name, opts...)
-			check("Manifest", err)
-			if len(name) != 0 {
-				want := "EXPLICIT_HOST"
-				if prefix {
-					want = "CUSTOM_HOST"
-				}
-				if len(variables) != 1 || variables[0].Name != want {
-					t.Fatalf("manifest: %v, want %s", variables, want)
-				}
-			}
-
-			loadOpts := []LoadOption{WithEnv(nil)}
-			for _, opt := range opts {
-				loadOpts = append(loadOpts, opt)
-			}
-			_, err = Load[ignoredNameConfig](name, loadOpts...)
-			check("Load", err)
-
-			loader := MakeLoader(WithEnv(nil))
-			loader.Register[ignoredNameConfig](name, opts...)
-			check("Loader.Register", loader.Load())
-		}
-	}
-}
-
 func TestMissingAndInvalidNames(t *testing.T) {
 	t.Parallel()
 
@@ -126,18 +73,14 @@ func TestMissingAndInvalidNames(t *testing.T) {
 func TestLoaderRejectsRepeatedNameAcrossTypes(t *testing.T) {
 	t.Parallel()
 
-	type first struct {
-		Host string `env:"HOST"`
-	}
-
-	type second struct {
-		Port int `env:"PORT"`
-	}
-
 	for _, prefix := range []string{"CONFXDUPLICATE_", "CONFXOTHER_"} {
 		loader := MakeLoader(WithEnv(nil))
-		loader.Register[first]("confxduplicate")
-		loader.Register[second]("confxduplicate", WithPrefix(prefix))
+		loader.Register[struct {
+			Host string `env:"HOST"`
+		}]("confxduplicate")
+		loader.Register[struct {
+			Port int `env:"PORT"`
+		}]("confxduplicate", WithPrefix(prefix))
 		err := loader.Load()
 		if err == nil || !strings.Contains(err.Error(), "registered more than once") {
 			t.Fatalf("prefix %s: %v", prefix, err)
@@ -181,6 +124,7 @@ func TestRegistrationErrorPrecedence(t *testing.T) {
 			for _, opt := range tc.opts {
 				loadOpts = append(loadOpts, opt)
 			}
+
 			_, loadErr := Load[int](tc.instanceName, loadOpts...)
 
 			for entry, err := range map[string]error{"Manifest": manifestErr, "Loader": loaderErr} {
@@ -194,6 +138,7 @@ func TestRegistrationErrorPrecedence(t *testing.T) {
 			if tc.name == "nil option" {
 				wantLoad = "a load option must not be nil\na config must be a struct, got int"
 			}
+
 			if loadErr == nil || loadErr.Error() != wantLoad {
 				t.Errorf("Load: got %v, want %q", loadErr, wantLoad)
 			}

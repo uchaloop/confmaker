@@ -30,11 +30,13 @@ func TestScalarParseErrorsPreserveCause(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			err = parse(reflect.New(test.target).Elem(), test.raw)
 			var numberError *strconv.NumError
 			if err == nil || err.Error() != test.message || !errors.Is(err, test.cause) || !errors.As(err, &numberError) || numberError.Num != test.raw {
 				t.Fatalf("message or cause lost: %v", err)
 			}
+
 			secretError := describeParseError(fieldSpec{Name: "APP_SECRET", Type: test.target.String(), Secret: true}, err)
 			if errors.As(secretError, &numberError) || errors.Is(secretError, test.cause) || strings.Contains(secretError.Error(), test.raw) {
 				t.Fatalf("secret cause exposed: %v", secretError)
@@ -48,6 +50,7 @@ func TestDurationParseErrorPreservesCause(t *testing.T) {
 	if err == nil || err.Error() != `"bad" is not a duration such as "30s" or "5m"` {
 		t.Fatalf("message: %v", err)
 	}
+
 	cause := errors.Unwrap(err)
 	_, expected := time.ParseDuration("bad")
 	if cause == nil || cause.Error() != expected.Error() {
@@ -56,21 +59,22 @@ func TestDurationParseErrorPreservesCause(t *testing.T) {
 }
 
 func TestLoadPreservesCollectionParseCauses(t *testing.T) {
-	type config struct {
+	_, err := Load[struct {
 		Values []*int8          `env:"VALUES"`
 		Limits map[string]uint8 `env:"LIMITS"`
-	}
-	_, err := Load[config]("app", WithEnv(map[string]string{"APP_VALUES": "128", "APP_LIMITS": "max:bad"}))
+	}]("app", WithEnv(map[string]string{"APP_VALUES": "128", "APP_LIMITS": "max:bad"}))
 	problems := ConfigErrors(err)
 	if len(problems) != 2 {
 		t.Fatalf("problems: %v", err)
 	}
+
 	for i, cause := range []error{strconv.ErrRange, strconv.ErrSyntax} {
 		var numberError *strconv.NumError
 		if problems[i].Kind != ErrorParse || problems[i].InstanceName != "app" || !errors.Is(problems[i], cause) || !errors.As(problems[i], &numberError) {
 			t.Fatalf("problem: %#v", problems[i])
 		}
 	}
+
 	if !errors.Is(err, strconv.ErrRange) || !errors.Is(err, strconv.ErrSyntax) {
 		t.Fatalf("joined causes: %v", err)
 	}

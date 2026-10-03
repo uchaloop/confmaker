@@ -98,6 +98,7 @@ func appendFields(fieldSpecs *[]fieldSpec, errs *[]error, structType reflect.Typ
 			if len(name) != 0 {
 				variableName = prefix + name
 			}
+
 			*errs = append(*errs, makeConfigError(ErrorDeclaration, variableName, fieldPath, err))
 		}
 		// `env:"-"` takes the field out of the config entirely, nested fields
@@ -140,9 +141,11 @@ func appendFields(fieldSpecs *[]fieldSpec, errs *[]error, structType reflect.Typ
 			leaf, err := compileField(field, name, suffix, prefix, fieldPath, index)
 			if err != nil {
 				*errs = append(*errs, makeConfigError(ErrorDeclaration, prefix+name, fieldPath, err))
-			} else {
-				*fieldSpecs = append(*fieldSpecs, leaf)
+
+				continue
 			}
+
+			*fieldSpecs = append(*fieldSpecs, leaf)
 		case hasOptions:
 			// A tag of options alone reads nothing. Treating it as an untagged
 			// field would drop a field its author plainly meant to configure.
@@ -283,8 +286,13 @@ func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environmen
 			if variable != nil {
 				variable.Status = VariableFailed
 			}
+
 			errs = append(errs, describeParseError(b, err))
-		} else if variable != nil {
+
+			continue
+		}
+
+		if variable != nil {
 			variable.Status = VariableSucceeded
 		}
 	}
@@ -347,6 +355,7 @@ func typeDeclaresVariables(t reflect.Type, seen map[reflect.Type]bool) bool {
 	if seen[t] {
 		return false
 	}
+
 	seen[t] = true
 
 	switch t.Kind() {
@@ -362,6 +371,7 @@ func typeDeclaresVariables(t reflect.Type, seen map[reflect.Type]bool) bool {
 			if name == "-" {
 				continue
 			}
+
 			if len(name) != 0 || typeDeclaresVariables(field.Type, seen) {
 				return true
 			}
@@ -377,6 +387,7 @@ func checkPointerChains(t reflect.Type, seen map[reflect.Type]bool) error {
 	if seen[t] {
 		return nil
 	}
+
 	seen[t] = true
 
 	chain := make(map[reflect.Type]bool)
@@ -384,6 +395,7 @@ func checkPointerChains(t reflect.Type, seen map[reflect.Type]bool) error {
 		if chain[t] {
 			return fmt.Errorf("cyclic pointer chain at %s cannot represent an ENV value", t)
 		}
+
 		chain[t] = true
 		t = t.Elem()
 	}

@@ -6,16 +6,7 @@ import (
 	"strings"
 )
 
-// configError attributes an error to the instance it came from. Every stage
-// reports all of its problems at once, and a joined error renders one per line -
-// so the name goes on each of them, not only on the first. A line that scrolls
-// past on its own still says which config it is about, which matters when one
-// process builds several.
-//
-// The name is put on the rendered lines rather than on the errors behind them,
-// because a stage is free to wrap its join in context of its own: labelling the
-// parts would report "config: max_conns must be positive" and lose the "pool:"
-// that said where in the config it is.
+// configError labels each error line with its instance name.
 type configError struct {
 	name string
 	err  error
@@ -92,12 +83,11 @@ func makeConfigError(kind ErrorKind, variableName, fieldPath string, err error) 
 	return &ConfigError{Kind: kind, VariableName: variableName, FieldPath: fieldPath, err: err}
 }
 
-// ConfigErrors collects structured problems in depth-first, left-to-right
-// order through both single wrappers and joined errors. It returns nil for nil
-// or an error without structured problems. A ConfigError is one problem: its
-// cause is not expanded, so Validate's own joined errors retain their context.
-// Repeated occurrences are preserved. Returned pointers refer to the errors in
-// the tree and should be treated as read-only, like the load result itself.
+// ConfigErrors returns all structured configuration problems in err, including
+// wrapped and joined errors. It returns nil if none are present. Validation
+// errors remain one problem even when Validate returns joined errors.
+// Results preserve error order and repeated occurrences. Treat the returned
+// pointers as read-only; they refer to the original errors.
 func ConfigErrors(err error) []*ConfigError {
 	var result []*ConfigError
 	var visit func(error)
@@ -105,10 +95,12 @@ func ConfigErrors(err error) []*ConfigError {
 		if err == nil {
 			return
 		}
+
 		if problem, ok := err.(*ConfigError); ok {
 			if problem != nil {
 				result = append(result, problem)
 			}
+
 			return
 		}
 
@@ -123,6 +115,7 @@ func ConfigErrors(err error) []*ConfigError {
 	}
 
 	visit(err)
+
 	return result
 }
 

@@ -93,6 +93,7 @@ func FuzzPlainField(f *testing.F) {
 func sameValue(a, b reflect.Value) bool {
 	if a.Kind() == reflect.Float32 || a.Kind() == reflect.Float64 {
 		x, y := a.Float(), b.Float()
+
 		return x == y || (math.IsNaN(x) && math.IsNaN(y))
 	}
 

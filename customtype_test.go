@@ -117,12 +117,10 @@ func TestCustomTypeInCollections(t *testing.T) {
 		"APP_TIERS":  "basic:100,pro:900",
 	}
 
-	type config struct {
+	cfg, err := Load[struct {
 		Prices []money          `env:"PRICES"`
 		Tiers  map[string]money `env:"TIERS"`
-	}
-
-	cfg, err := Load[config]("app", WithEnv(env))
+	}]("app", WithEnv(env))
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
@@ -140,14 +138,12 @@ func TestCustomTypeInCollections(t *testing.T) {
 // nesting rule rests on: a field that merely reaches a struct is skipped like
 // any other untagged field, and only a nested config is refused.
 func TestUntaggedFieldHoldingAStructIsNotConfiguration(t *testing.T) {
-	type config struct {
+	got := names(manifested[struct {
 		Host   string `env:"HOST"`
 		Prices []money
 		Price  *money
 		Tiers  map[string]money
-	}
-
-	got := names(manifested[config](t, "app"))
+	}](t, "app"))
 	if len(got) != 1 || got[0] != "APP_HOST" {
 		t.Fatalf("manifest = %v, want only APP_HOST", got)
 	}

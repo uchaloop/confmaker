@@ -6,9 +6,7 @@ import (
 	"strings"
 )
 
-// checkName rejects an instance name that would not make a sensible prefix or a
-// sensible label in errors. One written two ways, or with a space in it, which
-// no variable can carry, would silently read nothing.
+// checkName validates the instance name.
 func checkName(name string) error {
 	if len(name) == 0 {
 		return errors.New("an instance name is required")
@@ -31,10 +29,7 @@ func checkName(name string) error {
 	return nil
 }
 
-// checkPrefix rejects a prefix that would not read the variables it is meant to.
-// An empty one would claim every variable in the environment and could never be
-// checked for typos; one that does not end in an underscore would run into the
-// field's own name, turning HOST into REPORTINGHOST.
+// checkPrefix validates an explicit ENV prefix.
 func checkPrefix(prefix string) error {
 	if len(prefix) == 0 {
 		return errors.New("an environment prefix is required; every variable an application reads is prefixed")
@@ -56,14 +51,7 @@ func checkPrefix(prefix string) error {
 	return nil
 }
 
-// defaultPrefix turns an instance name into an env prefix. A variable is written
-// with underscores whatever the name uses, so "main" -> "MAIN_",
-// "read-replica" -> "READ_REPLICA_", "db.main" -> "DB_MAIN_".
-//
-// The name is walked a byte at a time because checkName has already established
-// its alphabet: lower-case letters, digits, and the three separators. That makes
-// the mapping the whole rule rather than a replacer and a case fold, neither of
-// which could say what a name is allowed to hold.
+// defaultPrefix uppercases the name and replaces separators with underscores.
 func defaultPrefix(name string) string {
 	prefix := make([]byte, len(name)+1)
 
