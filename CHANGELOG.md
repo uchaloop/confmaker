@@ -9,6 +9,8 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [1.0.1] - 2026-10-03
 
+- Set the minimum Go version to 1.27.0; CI uses the latest Go 1.27 patch release.
+
 - Updated `secret/v2` to v2.1.0 to fix disclosure through nested formatting and logging.
   **Compatibility:** `Secret` is no longer comparable; JSON `null` now clears it.
 - Added integration tests for secret loading, manifest redaction and safe parse errors.

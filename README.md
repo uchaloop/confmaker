@@ -20,7 +20,7 @@ passes typed values to consumers. The core works independently of any framework;
 
 ## Installation
 
-Requires **Go 1.27 or later**. The command below installs the latest stable release.
+Requires **Go 1.27.0 or later**. The command below installs the latest stable release.
 This README describes the current branch; for a pinned release, use its tagged documentation.
 
 ```sh
