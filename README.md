@@ -2,7 +2,7 @@
 
 <p align="center"><img src="logo.png" alt="confmaker" width="240"></p>
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/uchaloop/confmaker.svg)](https://pkg.go.dev/github.com/uchaloop/confmaker) [![CI](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/tag/uchaloop/confmaker?label=release)](https://github.com/uchaloop/confmaker/tags) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/uchaloop/confmaker.svg)](https://pkg.go.dev/github.com/uchaloop/confmaker) [![CI](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/uchaloop/confmaker/branch/main/graph/badge.svg)](https://app.codecov.io/gh/uchaloop/confmaker) [![Release](https://img.shields.io/github/v/tag/uchaloop/confmaker?label=release)](https://github.com/uchaloop/confmaker/tags) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Explicit, centralized configuration for Go applications.** Packages declare
 what they need; the application registers their configs, loads ENV once and

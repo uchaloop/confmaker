@@ -96,6 +96,26 @@ meaningful properties such as concurrency, secret handling or codec correctness;
 avoid tests that merely mirror implementation details. Support performance claims
 with relevant benchmarks and before/after results.
 
+## Coverage
+
+CI uploads Go coverage reports to Codecov for PR review. Project and patch
+coverage checks are informational: there is no required percentage, and upload
+failures do not block CI or releases. Test failures still fail CI. Use uncovered
+code to identify useful missing scenarios, not to add tests solely for a score.
+
+To inspect coverage locally:
+
+```sh
+go test -race -covermode=atomic -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+```
+
+Maintainers must enable `uchaloop/confmaker` in Codecov and configure its repository
+upload token as the GitHub Actions secret `CODECOV_TOKEN`. Do not put the token in
+source files. Fork PRs do not receive this secret; their upload availability
+follows Codecov's public-repository tokenless upload settings. The badge becomes
+available after a successful upload for `main`.
+
 ## Code style
 
 - Choose names that explain purpose. Use `Make…` / `make…` for constructors.
