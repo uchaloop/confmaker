@@ -44,6 +44,42 @@ and target this repository's `main` in the pull request. Maintainers use
 
 These names are recommendations, not CI requirements. Issue numbers are optional.
 
+## Commit messages
+
+Start each commit subject with the source branch name, followed by a colon,
+a space and a short English description of the change:
+
+```text
+release/1.0.0: library release with fixes
+feat/manifest-option: add manifest export option
+fix/json-text-defaults: reject defaults without a text marshaler
+```
+
+Use the full branch name as written. For example, on a branch named `feat/1.0.0`,
+the prefix is `feat/1.0.0: `. Prefer a description of the actual change over
+generic subjects such as "updates". For a squash merge, keep the source branch
+prefix in the resulting commit subject. This convention is not enforced by CI.
+
+## Release versions
+
+Release branches use `release/x.y.z`, where `x.y.z` is the target library version,
+not a branch counter. From v1 onward:
+
+- `x` (major) changes for incompatible public contract changes.
+- `y` (minor) changes for backward-compatible functionality additions.
+- `z` (patch) changes for backward-compatible bug fixes.
+
+Reset the lower components to zero when increasing a major or minor version.
+Feature and fix branches normally describe the task; they do not need a version
+number. The branch prefix alone does not determine the release version.
+
+Maintainers publish versions with Git tags: `release/1.0.0` prepares `v1.0.0`.
+A release candidate uses a tag such as `v1.0.0-rc.1`. A branch name does not
+publish a module version. Never move or replace a published version tag.
+See [Semantic Versioning](https://semver.org/) and
+[Go module version numbering](https://go.dev/doc/modules/version-numbers)
+for the full rules, including module path requirements for v2 and later.
+
 ## Development
 
 Use the Go version required by [go.mod](go.mod) or a compatible newer version.
