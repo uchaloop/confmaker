@@ -58,8 +58,8 @@ type ConfigManifest struct {
 // conflicts are reported before any config methods run. Rendering errors are
 // collected across configs; any error returns a nil result, never a partial list.
 //
-// Manifest does not read ENV, call Validate, write a dump or change loader state.
-// EnvOption settings, including their errors, apply only to Load and are ignored
+// Manifest does not read ENV, call Validate or change loader state.
+// Loading options and their errors are ignored
 // here. Each call runs SetDefaults and default marshalers on fresh instances;
 // it never inspects or changes loaded values or makes a Handle ready.
 //
@@ -79,13 +79,17 @@ func (l *Loader) Manifest() ([]ConfigManifest, error) {
 	for _, registration := range registrations {
 		if registration.err != nil {
 			errs = append(errs, registration.err)
+
 			continue
 		}
+
 		descriptors = append(descriptors, registration.descriptor)
 	}
+
 	if _, err := checkRegistrations(descriptors); err != nil {
 		errs = append(errs, err)
 	}
+
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
@@ -95,17 +99,21 @@ func (l *Loader) Manifest() ([]ConfigManifest, error) {
 		variables, err := manifestVariables(config)
 		if err != nil {
 			errs = append(errs, err)
+
 			continue
 		}
+
 		manifest = append(manifest, ConfigManifest{
 			InstanceName: config.instanceName,
 			Prefix:       config.prefix,
 			Variables:    variables,
 		})
 	}
+
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
+
 	return manifest, nil
 }
 
@@ -126,6 +134,7 @@ func Manifest[T any](name string, opts ...ConfigOption) ([]Variable, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return manifestVariables(config)
 }
 
@@ -135,11 +144,12 @@ func manifestVariables(config descriptor) ([]Variable, error) {
 	if err != nil {
 		return nil, wrapConfigError(config.instanceName, err)
 	}
+
 	return variables, nil
 }
 
 // describeFields renders defaults only for consumers that need a manifest.
-// Loading without a dump never calls a user-supplied text marshaler.
+// Loading never calls a user-supplied text marshaler.
 func describeFields(root reflect.Value, fields []fieldSpec) ([]Variable, error) {
 	variables := make([]Variable, len(fields))
 	var errs []error
@@ -151,6 +161,7 @@ func describeFields(root reflect.Value, fields []fieldSpec) ([]Variable, error) 
 			variable.Default, err = field.render(target)
 			if err != nil {
 				errs = append(errs, makeConfigError(ErrorDefaultRender, field.Name, field.field, fmt.Errorf("field %s (variable %q): cannot render default: %w", field.field, field.Name, err)))
+
 				continue
 			}
 
@@ -159,6 +170,7 @@ func describeFields(root reflect.Value, fields []fieldSpec) ([]Variable, error) 
 			for defaultType.Kind() == reflect.Pointer {
 				defaultType = defaultType.Elem()
 			}
+
 			switch defaultType.Kind() {
 			case reflect.Struct, reflect.Slice, reflect.Array, reflect.Map:
 				variable.complexDefault = true

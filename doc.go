@@ -78,7 +78,7 @@ into names as it stands, with or without a trailing underscore.
 A field may be a string, a bool, any sized integer or float, a time.Duration, a
 type implementing encoding.TextUnmarshaler, a pointer to one of those, or a slice
 or map of them. A TextUnmarshaler decodes its own text and reports its own
-errors; for a manifest or dump it also needs encoding.TextMarshaler. complex,
+errors; for a manifest it also needs encoding.TextMarshaler. complex,
 uintptr and []byte are refused. A slice splits on envSeparator ("," by default).
 A map splits entries the same way and each key from its value on
 envKeyValSeparator (":" by default). The separator tags apply only to a slice or
@@ -112,7 +112,7 @@ be structs held by value; hiding them behind pointers or collections at any
 depth is rejected. Plain ENV maps cannot use pointer keys, whose address
 identity would bypass duplicate-key checks. Parsed keys must equal themselves:
 NaN keys, including custom keys containing NaN, are rejected. NaN values remain
-valid. Recursive JSON structs remain valid.
+valid. Ordinary structs inside JSON are rejected.
 
 Declarations are checked when a config is registered, before any default or
 variable is read, and a mistake is reported by [Loader.Load], [Loader.Manifest] or [Manifest]:
@@ -156,47 +156,55 @@ once per config, and each manifest or export call evaluates it again on a fresh
 instance. Only the top-level
 config's methods are called.
 
-# JSON values
+For use outside the loader, a package can expose a defaults factory and delegate
+SetDefaults to it:
 
-envFormat:"json" reads one variable as JSON, with encoding/json/v2, into a
-struct, slice, array or map, or a pointer directly to one of these shapes.
-Supported members inside that JSON value may themselves be nested:
-
-	type Config struct {
-		Endpoints []Endpoint `env:"ENDPOINTS" envFormat:"json"`
+	func DefaultConfig() Config {
+		return Config{Timeout: 30 * time.Second}
 	}
 
-	STORE_ENDPOINTS=[{"url":"http://a:9000","timeout":"30s"}]
+	func (c *Config) SetDefaults() {
+		*c = DefaultConfig()
+	}
 
-The value is decoded into the field's type:
+Tests and manually assembled applications can call DefaultConfig, apply their
+own overrides and call Validate explicitly. confmaker discovers only SetDefaults,
+not the factory. Config{} does not apply defaults. This SetDefaults implementation
+replaces the entire value, so it must run before overrides. Keep invariants that
+must hold outside ENV loading in Validate: required and notEmpty check the supplied
+ENV, not a manually constructed config.
 
-  - A set variable replaces the whole field; nothing is merged with the default.
-    [{"url":"http://a"}] leaves timeout zero even when the default had one.
-  - Member names match exactly, and duplicate members are errors. Unknown members are rejected unless collected
-    by an inline fallback map. A JSON tag with case:ignore enables
-    case-insensitive matching for that field.
-  - Only json:"-" ignores a field; json:"-," and json:"-,omitempty" name it "-".
-  - null clears a pointer, slice or map and is an error elsewhere. [] and {} are
-    empty collections. An empty variable is an error.
-  - A time.Duration is a string such as "30s", in collections too.
-  - A type with UnmarshalJSON or UnmarshalText reads its own form, and is as
-    strict as it decides to be.
+# JSON collections
 
-Refused at registration: envFormat on a scalar, an unknown format, envFormat with
-a separator tag, interface values, []byte and byte arrays, map keys other than
-strings, integers or text types, any secret type inside the value, ignored
-fields included (such a secret is refused, not masked), and a struct json/v2
-rejects as an object - two fields on one JSON name, for example. The last check
-decodes {} into each struct type, which runs no method of the config.
+envFormat:"json" reads a slice, array or map from one variable. A pointer to
+one of these collections is also supported. Nested collections are allowed:
 
-An error names the variable and the place inside the value:
+	type Config struct {
+	 Headers map[string]string `env:"HEADERS" envFormat:"json"`
+	 Groups map[string][]string `env:"GROUPS" envFormat:"json"`
+	}
 
-	config "store": variable "STORE_ENDPOINTS": JSON at "/0/timeout": time: invalid duration "soon"
+	APP_HEADERS={"X-Service":"catalog"}
+	APP_GROUPS={"read":["primary","replica"]}
 
-A manifest renders a JSON default with sorted map keys and nil as null. Whether
-it loads back to an equal value depends on the type: custom marshalers decide
-their own form, and omitempty drops an empty slice or map, which then loads back
-as nil. omitzero keeps an empty non-nil collection.
+A supplied value replaces the entire default. Duplicate keys and empty input
+are errors. null clears pointers, maps and slices; it is invalid for other
+values. Durations use strings such as "30s". Map keys must be strings, integers
+or supported text types. Defaults render with deterministic map ordering.
+
+Ordinary structs are rejected at every depth, including collection elements.
+Declare nested configuration by value with envPrefix instead. Types implementing
+encoding.TextUnmarshaler may represent scalar text values, including time.Time;
+they are read from JSON strings using UnmarshalText. Rendering their defaults
+requires encoding.TextMarshaler; otherwise manifest returns ErrorDefaultRender.
+Text methods take precedence over JSON methods in both directions. Custom text
+methods must agree on a representation that can be read back.
+A JSON-only custom decoder does not exempt a struct from this restriction.
+
+Interfaces, byte collections without a custom text form, unsupported kinds and
+secret types are rejected. Secrets hidden inside custom text types are rejected
+too. envFormat cannot be combined with separator tags. Errors identify the ENV
+variable and location in the JSON value, preserving the underlying JSON error.
 
 # Loading and lifecycle
 
@@ -205,13 +213,11 @@ as nil. omitzero keeps an empty non-nil collection.
  1. Invalid options and registrations are reported; the other configs still
     load.
  2. Conflicting registrations - two on one name, prefix or variable - end loading
-    here, before any SetDefaults runs or anything is printed.
+    here, before any SetDefaults runs.
  3. One snapshot of the environment is taken.
  4. SetDefaults runs for each config.
- 5. The dump is written, when [WithDump] asks for one. A dump that fails is
-    reported and does not stop the checks.
- 6. Variables under a registered prefix that no field reads are reported.
- 7. The environment is applied and Validate runs, for each config.
+ 5. Variables under a registered prefix that no field reads are reported.
+ 6. The environment is applied and Validate runs, for each config.
 
 Problems are joined into one error. Config registrations are processed in a
 deterministic order rather than the order of Register calls; unknown variables
@@ -222,13 +228,13 @@ are sorted by name. Errors from different stages retain their stage order:
 
 Values are handed out only when the whole set loaded; see [Handle.Value]. Load
 runs once. A [Loader] is safe for concurrent use and holds no lock while
-SetDefaults, Validate, unmarshalers or the dump writer run; those may
+SetDefaults, Validate or unmarshalers run; those may
 call Register on that Loader or Value on its handles, but must not call its Load.
 
 # Environment and testing
 
-Load reads one snapshot of the environment, shared by loading, the check for
-unknown variables and the dump. By default it is the process environment;
+Load reads one snapshot of the environment, shared by field parsing and the
+check for unknown variables. By default it is the process environment;
 [WithEnv] replaces it with a map, which suits tests:
 
 	cfg, err := confmaker.Load[Config]("store", confmaker.WithEnv(map[string]string{
@@ -271,17 +277,17 @@ loader; Report is safe for concurrent use and returns independent copies.
 Loading panics remain panics and skip the handler; the receiver records
 [LoadPanicked]. See [WithDiagnosticHandler] for completion and callback ordering.
 
-# Manifest, dump and secrets
+# Manifest and secrets
 
 [Loader.Manifest] describes a snapshot of all registrations as []ConfigManifest,
 ordered by instance name, with variables in declaration order. It checks invalid
 registrations and conflicts before invoking config methods. Any declaration,
-conflict or rendering error returns a nil result. Load options, including WithEnv and WithDump, are ignored.
+conflict or rendering error returns a nil result. Load options, including WithEnv, are ignored.
 
 	configs, err := loader.Manifest()
 
-It can run before, during or after Load, without reading ENV, calling Validate,
-writing a dump or changing loader state. Each call evaluates defaults on fresh
+It can run before, during or after Load, without reading ENV, calling Validate
+or changing loader state. Each call evaluates defaults on fresh
 instances and never reads loaded values. Registrations completed after the
 snapshot are included on the next call. If called concurrently with Load or
 another Manifest, user-supplied defaults and marshalers must support concurrent
@@ -310,27 +316,21 @@ Both use the same Manifest lifecycle and ordering, finish preparation before
 writing and leave file handling to the caller. Writer failures can leave partial
 output. JSON's hasDefault retains the non-zero semantics described below.
 
-[Manifest] and [WithDump] describe the same variables for different purposes:
-
-  - Manifest returns metadata for generating a .env.example, a config map or a
-    table. It does not read the environment, but it calls SetDefaults and renders
-    each default with MarshalText or the field's plain syntax.
-  - WithDump prints, while loading, each variable's environment value or
-    default and its source. It is an input report, not proof that loading
-    succeeded. Control characters are escaped.
+[Manifest] describes declarations and defaults without reading ENV.
+[Diagnostics] describes a load's sources and results without recording values.
 
 Manifest and all exporters are strict: if any default cannot be rendered,
 the whole description fails. This includes nil pointers anywhere in a plain
 collection element or a default that its separators cannot represent. A
 commented .env.example placeholder does not bypass that check. Ordinary loading
-without WithDump does not require defaults to be rendered.
+does not require defaults to be rendered.
 [Variable.HasDefault] reports a non-zero default and cannot tell an explicit
 false, 0 or "" from no default. Manifest values are ENV text; a generator escapes
 them for shell or YAML itself.
 
-A field of a secret type (github.com/uchaloop/secret/v2) is never printed: not in
-the dump, the manifest or a parse error. Secrets are recognised by type only. A
-password written into a plain string, such as postgres://user:password@host/db,
-is printed like any other text; keep it in its own secret field.
+Secret defaults (github.com/uchaloop/secret/v2) are excluded from manifest
+exports and secret parse values are omitted from library errors. Ordinary defaults
+are included in manifest exports; user validation errors may contain values.
+Keep credentials out of non-secret defaults and user-generated error messages.
 */
 package confmaker

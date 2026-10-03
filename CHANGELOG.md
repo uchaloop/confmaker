@@ -7,6 +7,21 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-03
+
+- First stable release of the explicit ENV configuration API, manifest and diagnostics.
+- **Breaking:** removed `WithDump`; use manifest for declarations and diagnostics
+  for load sources and results without loaded values.
+- **Breaking:** JSON fields accept collections, including nested collections and
+  scalar text types; ordinary structs are rejected at every depth.
+- JSON text values consistently use text methods instead of JSON methods;
+  manifest rejects text defaults without `MarshalText` with `ErrorDefaultRender`.
+- Reduced diagnostic allocations and simplified tests around public behavior.
+- Updated README and GoDoc, documented defaults outside the loader, and added
+  contribution guidelines.
+- GitHub Releases now require passing CI; added module consistency checks,
+  version tag validation and correct prerelease handling.
+
 ## [0.9.0] - 2026-10-01
 - Added value-free load reports and completion handlers with `WithDiagnostics`
   and `WithDiagnosticHandler`; preserved completed-stage problems after panics
@@ -357,7 +372,8 @@ its only dependencies.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/uchaloop/confmaker/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/uchaloop/confmaker/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/uchaloop/confmaker/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/uchaloop/confmaker/compare/v0.6.2...v0.7.0

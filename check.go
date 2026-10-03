@@ -56,12 +56,16 @@ func checkUnknown(descriptors []descriptor, known map[string]string, allowed []s
 			if !strings.HasPrefix(name, config.prefix) {
 				continue
 			}
+
 			if len(problem.InstanceName) != 0 {
 				problem.InstanceName = ""
+
 				break
 			}
+
 			problem.InstanceName = config.instanceName
 		}
+
 		errs = append(errs, problem)
 	}
 

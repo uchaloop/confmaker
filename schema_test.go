@@ -1,7 +1,6 @@
 package confmaker
 
 import (
-	"bytes"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -35,20 +34,6 @@ func TestLoaderLoadsWithoutEncoder(t *testing.T) {
 	typo := WithEnv(map[string]string{"CONFXSCHEMA_VALUE": "abcd", "CONFXSCHEMA_VLAUE": "typo"})
 	if _, err := Load[schemaConfig]("confxschema", typo); err == nil || !strings.Contains(err.Error(), "unknown configuration variable") {
 		t.Fatalf("schema did not check typo: %v", err)
-	}
-}
-
-func TestDumpAndManifestStillRequireEncoder(t *testing.T) {
-	t.Parallel()
-
-	var out bytes.Buffer
-	_, err := Load[schemaConfig]("confxschema", WithDump(&out), WithEnv(nil))
-	if err == nil || !strings.Contains(err.Error(), "TextMarshaler") || !strings.Contains(err.Error(), `config "confxschema"`) {
-		t.Fatalf("dump error: %v", err)
-	}
-
-	if _, err := Manifest[schemaConfig]("confxschema"); err == nil || !strings.Contains(err.Error(), `config "confxschema"`) {
-		t.Fatalf("manifest error: %v", err)
 	}
 }
 

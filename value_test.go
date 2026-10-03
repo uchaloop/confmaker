@@ -10,23 +10,19 @@ import (
 	"github.com/uchaloop/secret/v2"
 )
 
-// parseInto assigns raw to a fresh T and returns it, so a case reads as
-// "this text becomes this value". A type that cannot be read at all is reported
-// by the same call, because the parser is chosen from the type before any value
-// is seen.
 func parseInto[T any](t *testing.T, raw string) (T, error) {
 	t.Helper()
 
-	var target T
-
-	parse, err := fieldParser(reflect.TypeFor[T](), defaultSeparator, defaultKeyValSeparator)
+	loaded, err := Load[struct {
+		Value T `env:"VALUE"`
+	}]("app", WithEnv(map[string]string{"APP_VALUE": raw}))
 	if err != nil {
-		return target, err
+		var zero T
+
+		return zero, err
 	}
 
-	err = parse(reflect.ValueOf(&target).Elem(), raw)
-
-	return target, err
+	return loaded.Value, nil
 }
 
 func TestParseScalars(t *testing.T) {
@@ -318,13 +314,11 @@ func TestCustomSeparators(t *testing.T) {
 		"CONFXAPP_PLAIN":   "k:v",
 	}
 
-	type config struct {
+	cfg, err := Load[struct {
 		Brokers []string          `env:"BROKERS" envSeparator:";"`
 		Tiers   map[string]int    `env:"TIERS" envSeparator:"|" envKeyValSeparator:"="`
 		Plain   map[string]string `env:"PLAIN"`
-	}
-
-	cfg, err := Load[config]("confxapp", WithEnv(env))
+	}]("confxapp", WithEnv(env))
 	if err != nil {
 		t.Fatalf("fill: %v", err)
 	}
@@ -377,11 +371,9 @@ func TestParseUnsignedIntegers(t *testing.T) {
 }
 
 func TestPointerToAnUnreadableTypeIsRefused(t *testing.T) {
-	type config struct {
+	if err := bindError[struct {
 		Ratio *complex128 `env:"RATIO"`
-	}
-
-	if err := bindError[config](t); !strings.Contains(err.Error(), "cannot be read") {
+	}](t); !strings.Contains(err.Error(), "cannot be read") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

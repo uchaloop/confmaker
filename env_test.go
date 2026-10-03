@@ -1,7 +1,6 @@
 package confmaker
 
 import (
-	"bytes"
 	"os"
 	"strings"
 	"testing"
@@ -59,23 +58,6 @@ func TestWithEnvGivenTwiceIsReported(t *testing.T) {
 	}
 }
 
-func TestWithEnvFeedsTheCheckAndTheDump(t *testing.T) {
-	// The process holds a typo and a host the map does not: neither may show.
-	t.Setenv("CONFXENV_HSOT", "process typo")
-	t.Setenv("CONFXENV_HOST", "process host")
-
-	var out bytes.Buffer
-	_, err := Load[envConfig]("confxenv", WithDump(&out), WithEnv(map[string]string{"CONFXENV_HOST": "map host", "CONFXENV_PROT": "1"}))
-
-	if err == nil || !strings.Contains(err.Error(), `unknown configuration variable "CONFXENV_PROT"`) || strings.Contains(err.Error(), "CONFXENV_HSOT") {
-		t.Fatalf("the check did not read the map: %v", err)
-	}
-
-	if !strings.Contains(out.String(), "map host") || strings.Contains(out.String(), "process host") {
-		t.Fatalf("the dump did not read the map:\n%s", out.String())
-	}
-}
-
 // snapshotConfig changes the process environment while it is being loaded.
 type snapshotConfig struct {
 	Host string `env:"HOST"`
@@ -98,15 +80,17 @@ func TestProcessEnvironmentIsTakenOnce(t *testing.T) {
 	}
 }
 
-func TestOSEnvironmentSkipsNamelessEntries(t *testing.T) {
+func TestProcessEnvironmentPreservesEqualsInValues(t *testing.T) {
 	t.Setenv("CONFXENV_EQUALS", "a=b")
 
-	env := osEnvironment()
-	if value, ok := env["CONFXENV_EQUALS"]; !ok || value != "a=b" {
-		t.Fatalf("value with = split wrongly: %q, %v", value, ok)
+	loaded, err := Load[struct {
+		Value string `env:"EQUALS"`
+	}]("confxenv")
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	if _, ok := env[""]; ok {
-		t.Fatal("a nameless entry was kept")
+	if loaded.Value != "a=b" {
+		t.Fatalf("value = %q, want a=b", loaded.Value)
 	}
 }

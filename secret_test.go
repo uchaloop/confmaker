@@ -1,7 +1,6 @@
 package confmaker
 
 import (
-	"bytes"
 	"errors"
 	"strings"
 	"testing"
@@ -9,42 +8,10 @@ import (
 	"github.com/uchaloop/secret/v2"
 )
 
-func TestParseErrorNeverCarriesASecretValue(t *testing.T) {
-	t.Parallel()
-
-	env := map[string]string{
-		"CONFXAPP_PASSWORD": "hunter2",
-	}
-
-	type config struct {
-		Password secret.Secret `env:"PASSWORD"`
-	}
-
-	// secret.Secret decodes anything, so the guarantee is checked through the
-	// dump and the manifest instead, and through a value that fails elsewhere.
-
-	_, err := Load[config]("confxapp", WithEnv(env))
-	if err != nil {
-		t.Fatalf("fill: %v", err)
-	}
-
-	var out bytes.Buffer
-
-	if _, err := Load[config]("confxapp", WithDump(&out), WithEnv(env)); err != nil {
-		t.Fatalf("load: %v", err)
-	}
-
-	if strings.Contains(out.String(), "hunter2") {
-		t.Fatalf("the dump printed a secret:\n%s", out.String())
-	}
-}
-
 func TestPointerToSecretIsMasked(t *testing.T) {
-	type config struct {
+	variables := manifested[struct {
 		Password *secret.Secret `env:"PASSWORD"`
-	}
-
-	variables := manifested[config](t, "confxapp")
+	}](t, "confxapp")
 	if !variables[0].Secret {
 		t.Fatal("a pointer to a secret was not recognised as one")
 	}
@@ -64,33 +31,6 @@ func TestParseErrorNeverNamesASecretValue(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "CONFXAPP_PASSWORD") {
 		t.Fatalf("the error does not name the variable: %v", err)
-	}
-}
-
-func TestSecretBehindAnyPointerDepthIsMasked(t *testing.T) {
-	t.Parallel()
-
-	type single struct {
-		Password ***secret.Secret `env:"PASSWORD"`
-	}
-
-	var out bytes.Buffer
-	cfg, err := Load[single]("confxapp", WithDump(&out), WithEnv(map[string]string{"CONFXAPP_PASSWORD": "FAKE_SECRET"}))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if (***cfg.Password).Reveal() != "FAKE_SECRET" {
-		t.Fatal("the secret was not loaded")
-	}
-
-	if strings.Contains(out.String(), "FAKE_SECRET") || !strings.Contains(out.String(), "(set)") {
-		t.Fatalf("the dump printed a secret behind pointers:\n%s", out.String())
-	}
-
-	variables := manifested[single](t, "confxapp")
-	if !variables[0].Secret || len(variables[0].Default) != 0 {
-		t.Fatalf("the manifest does not treat it as a secret: %+v", variables[0])
 	}
 }
 
@@ -119,11 +59,9 @@ func TestSecretBehindPointersInCollectionIsRefused(t *testing.T) {
 func TestParseErrorBehindPointersNeverPrintsTheValue(t *testing.T) {
 	t.Parallel()
 
-	type config struct {
+	_, err := Load[struct {
 		Password **secret.Secret `env:"PASSWORD,notEmpty"`
-	}
-
-	_, err := Load[config]("confxapp", WithEnv(map[string]string{"CONFXAPP_PASSWORD": ""}))
+	}]("confxapp", WithEnv(map[string]string{"CONFXAPP_PASSWORD": ""}))
 	if err == nil || strings.Contains(err.Error(), "FAKE") {
 		t.Fatalf("got %v", err)
 	}

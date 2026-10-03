@@ -44,6 +44,7 @@ func (l *Loader) WriteManifestMarkdown(writer io.Writer) error {
 			if !variable.Secret && variable.HasDefault {
 				defaultText = escapeManifestMarkdownText(variable.Default)
 			}
+
 			fmt.Fprintf(&output, "| %s | %s | %s | %s | %s | %s |\n",
 				manifestMarkdownCode(variable.Name), manifestMarkdownCode(variable.Type), requirement,
 				secret, defaultText, escapeManifestMarkdownText(variable.Description))
@@ -51,11 +52,15 @@ func (l *Loader) WriteManifestMarkdown(writer io.Writer) error {
 	}
 
 	n, err := io.WriteString(writer, output.String())
-	if err == nil && n != output.Len() {
+	if err != nil {
+		return err
+	}
+
+	if n != output.Len() {
 		return io.ErrShortWrite
 	}
 
-	return err
+	return nil
 }
 
 // escapeManifestMarkdownText keeps user text literal inside headings and table cells.

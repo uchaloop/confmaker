@@ -45,6 +45,7 @@ func TestWriteEnvExample(t *testing.T) {
 	if err := loader.WriteEnvExample(&output); err != nil {
 		t.Fatal(err)
 	}
+
 	want := "# Configuration: \"app\"\n" +
 		"# API address\n# Use the staging endpoint\n# Required; must not be empty.\nAPP_HOST=https://api.example.test\n\n" +
 		"# APP_COUNT=\n\n# APP_ENABLED=\n\n" +
@@ -54,9 +55,11 @@ func TestWriteEnvExample(t *testing.T) {
 	if output.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", &output, want)
 	}
+
 	if _, err := config.Value(); !errors.Is(err, ErrNotLoaded) {
 		t.Fatalf("generation changed handle state: %v", err)
 	}
+
 	variables, err := Manifest[envExampleConfig]("app")
 	if err != nil || variables[0].Description != "API address\nUse the staging endpoint" || variables[7].Description != "Pool size" {
 		t.Fatalf("descriptions missing: %v, %v", variables, err)
@@ -64,20 +67,21 @@ func TestWriteEnvExample(t *testing.T) {
 }
 
 func TestWriteEnvExampleEscapesCommentContent(t *testing.T) {
-	type config struct {
-		Value string `env:"BAD\nINJECTED" envDescription:"first\rINJECTED=value\x00"`
-	}
 	loader := MakeLoader()
-	loader.Register[config]("app")
+	loader.Register[struct {
+		Value string `env:"BAD\nINJECTED" envDescription:"first\rINJECTED=value\x00"`
+	}]("app")
 	var output bytes.Buffer
 	if err := loader.WriteEnvExample(&output); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, line := range strings.Split(output.String(), "\n") {
 		if len(line) != 0 && !strings.HasPrefix(line, "# ") {
 			t.Fatalf("uncommented content: %q", line)
 		}
 	}
+
 	if strings.ContainsRune(output.String(), 0) {
 		t.Fatal("raw control character in output")
 	}
@@ -94,9 +98,11 @@ func TestWriteEnvExampleErrors(t *testing.T) {
 	if err := loader.WriteEnvExample(exampleErrorWriter{writeErr}); !errors.Is(err, writeErr) {
 		t.Fatalf("writer error lost: %v", err)
 	}
+
 	if err := loader.WriteEnvExample(exampleErrorWriter{}); !errors.Is(err, io.ErrShortWrite) {
 		t.Fatalf("short write lost: %v", err)
 	}
+
 	loader.Register[envExampleConfig]("app")
 	var output bytes.Buffer
 	if err := loader.WriteEnvExample(&output); err == nil || output.Len() != 0 {
@@ -110,16 +116,19 @@ func TestEnvExampleAssignmentSyntax(t *testing.T) {
 			t.Errorf("safe default rejected: %q", value)
 		}
 	}
+
 	for _, value := range []string{"", "two words", "$TOKEN", "${TOKEN}", "`command`", "#comment", "a\nb", "a\rb", "a\x00b", "'quoted'", "\"quoted\"", "a\\b", "a;b", "a&b"} {
 		if isEnvExampleDefaultSafe(value) {
 			t.Errorf("unsafe default accepted: %q", value)
 		}
 	}
+
 	for _, name := range []string{"APP_URL", "_VALUE", "value2"} {
 		if !isEnvExampleVariableName(name) {
 			t.Errorf("safe name rejected: %q", name)
 		}
 	}
+
 	for _, name := range []string{"", "2VALUE", "APP.HOST", "A B", "A\nB", "A=B"} {
 		if isEnvExampleVariableName(name) {
 			t.Errorf("unsafe name accepted: %q", name)
@@ -128,15 +137,15 @@ func TestEnvExampleAssignmentSyntax(t *testing.T) {
 }
 
 func ExampleLoader_WriteEnvExample() {
-	type config struct {
-		URL string `env:"URL,notEmpty" envDescription:"Service endpoint"`
-	}
 	loader := MakeLoader()
-	loader.Register[config]("api")
+	loader.Register[struct {
+		URL string `env:"URL,notEmpty" envDescription:"Service endpoint"`
+	}]("api")
 	var output bytes.Buffer
 	if err := loader.WriteEnvExample(&output); err != nil {
 		panic(err)
 	}
+
 	fmt.Print(output.String())
 	// Output:
 	// # Configuration: "api"

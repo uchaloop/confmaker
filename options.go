@@ -3,7 +3,6 @@ package confmaker
 import (
 	"errors"
 	"fmt"
-	"io"
 	"reflect"
 )
 
@@ -20,7 +19,7 @@ type ConfigOption interface {
 	applyConfig(*configSettings)
 }
 
-// EnvOption configures a whole load: [WithEnv], [WithDump], [AllowUnknown],
+// EnvOption configures a whole load: [WithEnv], [AllowUnknown],
 // [WithDiagnostics] and [WithDiagnosticHandler].
 // [MakeLoader] and [Load] take it.
 type EnvOption interface {
@@ -37,7 +36,6 @@ type configSettings struct {
 // envSettings holds the resolved options of a load.
 type envSettings struct {
 	allowed           []string
-	dump              io.Writer
 	env               environment
 	envRepeated       bool
 	diagnostics       *Diagnostics
@@ -81,17 +79,6 @@ func AllowUnknown(prefixes ...string) EnvOption {
 
 	return envOption(func(s *envSettings) {
 		s.allowed = append(s.allowed, allowed...)
-	})
-}
-
-// WithDump writes a table to w while loading: each variable the configs declare,
-// its type, its environment value or rendered default, and where the value comes
-// from. It is written even when loading fails, except for conflicting
-// registrations, so it is not proof that loading succeeded. Secrets are shown as
-// set or unset, never printed.
-func WithDump(w io.Writer) EnvOption {
-	return envOption(func(s *envSettings) {
-		s.dump = w
 	})
 }
 

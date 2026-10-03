@@ -1,6 +1,7 @@
 package confmaker
 
 import (
+	"encoding"
 	"encoding/json/jsontext"
 	json "encoding/json/v2"
 	"errors"
@@ -27,8 +28,21 @@ var jsonFieldOptions = json.JoinOptions(
 				}
 			}
 
-			// Leave decoding to the duration adapter or the native typed decoder.
-			return errors.ErrUnsupported
+			unmarshaler, ok := target.(encoding.TextUnmarshaler)
+			if !ok {
+				return errors.ErrUnsupported
+			}
+
+			if dec.PeekKind() != '"' {
+				return fmt.Errorf("a text value must be a JSON string")
+			}
+
+			token, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+
+			return unmarshaler.UnmarshalText([]byte(token.String()))
 		}),
 		json.UnmarshalFromFunc[*time.Duration](func(dec *jsontext.Decoder, target *time.Duration) error {
 			// A bare number has no unit: 30000 could mean nanoseconds or
@@ -59,14 +73,28 @@ var jsonFieldOptions = json.JoinOptions(
 			return nil
 		}),
 	)),
-	json.WithMarshalers(json.MarshalToFunc[time.Duration](func(enc *jsontext.Encoder, value time.Duration) error {
-		return enc.WriteToken(jsontext.String(value.String()))
-	})),
-)
+	json.WithMarshalers(json.JoinMarshalers(
+		json.MarshalToFunc[any](func(enc *jsontext.Encoder, source any) error {
+			value := reflect.ValueOf(source).Elem()
+			if !decodesJSONText(value.Type()) {
+				return errors.ErrUnsupported
+			}
 
-var (
-	jsonUnmarshalerType     = reflect.TypeFor[json.Unmarshaler]()
-	jsonUnmarshalerFromType = reflect.TypeFor[json.UnmarshalerFrom]()
+			text, ok, err := textOf(value)
+			if err != nil {
+				return err
+			}
+
+			if !ok {
+				return fmt.Errorf("text type %s requires encoding.TextMarshaler to render a JSON default", value.Type())
+			}
+
+			return enc.WriteToken(jsontext.String(text))
+		}),
+		json.MarshalToFunc[time.Duration](func(enc *jsontext.Encoder, value time.Duration) error {
+			return enc.WriteToken(jsontext.String(value.String()))
+		}),
+	)),
 )
 
 func jsonParser(t reflect.Type) (parser, error) {
@@ -106,14 +134,12 @@ func jsonParser(t reflect.Type) (parser, error) {
 func emptyJSONHint(t reflect.Type) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		switch t.Elem().Kind() {
-		case reflect.Struct, reflect.Slice, reflect.Array, reflect.Map:
+		case reflect.Slice, reflect.Array, reflect.Map:
 			return "write null for no value", nil
 		}
 	}
 
 	switch t.Kind() {
-	case reflect.Struct:
-		return "write {} for an object with zero fields", nil
 	case reflect.Slice:
 		return "write [] for an empty list or null for none", nil
 	case reflect.Array:
@@ -122,7 +148,7 @@ func emptyJSONHint(t reflect.Type) (string, error) {
 		return "write {} for an empty map or null for none", nil
 	}
 
-	return "", fmt.Errorf("envFormat json reads a struct, slice, array or map, not %s; drop envFormat to read it as plain text", t)
+	return "", fmt.Errorf("envFormat json reads a slice, array or map, not %s; drop envFormat to read it as plain text", t)
 }
 
 // describeJSONError says where in the value the problem is. The pointer names the
@@ -200,8 +226,11 @@ func renderJSON(value reflect.Value) (string, error) {
 	value = addressableValue(value)
 
 	raw, err := json.Marshal(value.Addr().Interface(), jsonFieldOptions)
+	if err != nil {
+		return string(raw), err
+	}
 
-	return string(raw), err
+	return string(raw), nil
 }
 
 // Inspect the complete type graph, including ignored and private fields: custom
@@ -236,11 +265,9 @@ func checkJSONSecrets(t reflect.Type, seen map[reflect.Type]bool) error {
 	return nil
 }
 
-// decodesItselfFromJSON reports a type that owns its JSON form. Its fields are
-// its own business, so they are not inspected; secrets inside it still are.
-func decodesItselfFromJSON(t reflect.Type) bool {
-	p := reflect.PointerTo(t)
-	return p.Implements(jsonUnmarshalerType) || p.Implements(jsonUnmarshalerFromType) || p.Implements(textUnmarshalerType)
+// decodesJSONText identifies collection elements with a scalar text form.
+func decodesJSONText(t reflect.Type) bool {
+	return reflect.PointerTo(t).Implements(textUnmarshalerType)
 }
 
 func checkJSONType(t reflect.Type, seen map[reflect.Type]bool) error {
@@ -254,14 +281,14 @@ func checkJSONType(t reflect.Type, seen map[reflect.Type]bool) error {
 		return fmt.Errorf("JSON requires concrete types, got %s", t)
 	}
 
-	if decodesItselfFromJSON(t) {
+	if decodesJSONText(t) {
 		return nil
 	}
 
 	switch t.Kind() {
 	case reflect.Slice, reflect.Array:
 		// JSON carries bytes as base64 text, which nobody writes by hand.
-		if t.Elem().Kind() == reflect.Uint8 && !decodesItselfFromJSON(t.Elem()) {
+		if t.Elem().Kind() == reflect.Uint8 && !decodesJSONText(t.Elem()) {
 			return fmt.Errorf("JSON would read %s as base64 text; use a string", t)
 		}
 
@@ -285,31 +312,7 @@ func checkJSONType(t reflect.Type, seen map[reflect.Type]bool) error {
 
 		return checkJSONType(t.Elem(), seen)
 	case reflect.Struct:
-		for field := range t.Fields() {
-			// The rule json/v2 applies: only a tag of exactly "-" ignores a
-			// field; "-," and "-,omitempty" name it "-".
-			if len(field.PkgPath) != 0 || field.Tag.Get("json") == "-" {
-				continue
-			}
-
-			if err := checkJSONType(field.Type, seen); err != nil {
-				return fmt.Errorf("%s: %w", field.Name, err)
-			}
-		}
-
-		// Let json/v2 judge the object form itself - names that conflict, inline
-		// fields, tag options - at registration rather than when a variable is
-		// first set. Decoding {} builds the struct's fields and runs no user
-		// code: a type that decodes itself does not reach this case, and no
-		// member is decoded.
-		if err := json.Unmarshal([]byte("{}"), reflect.New(t).Interface(), jsonFieldOptions); err != nil {
-			var semantic *json.SemanticError
-			if errors.As(err, &semantic) && semantic.Err != nil {
-				err = semantic.Err
-			}
-
-			return fmt.Errorf("%s has no valid JSON object form: %w", t, err)
-		}
+		return fmt.Errorf("JSON structs are not supported: %s; use nested fields with envPrefix or a text type", t)
 	case reflect.String, reflect.Bool,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,

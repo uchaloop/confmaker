@@ -29,6 +29,7 @@ func MakeDescribeFlag(flags *flag.FlagSet) *DescribeFlag {
 			return fmt.Errorf("unknown description format %q; use env, markdown or json", format)
 		}
 	})
+
 	return describe
 }
 

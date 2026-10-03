@@ -2,7 +2,6 @@ package confmaker_test
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/uchaloop/confmaker"
@@ -33,6 +32,7 @@ func ExampleLoad() {
 	}))
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 
@@ -71,6 +71,7 @@ func ExampleLoader() {
 
 	if err := loader.Load(); err != nil {
 		fmt.Println(err)
+
 		return
 	}
 
@@ -88,6 +89,7 @@ func ExampleManifest() {
 	variables, err := confmaker.Manifest[StoreConfig]("store")
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
 
@@ -100,19 +102,6 @@ func ExampleManifest() {
 	// STORE_TIMEOUT=30s
 }
 
-// WithDump prints each variable, its value and where it came from.
-func ExampleWithDump() {
-	_, err := confmaker.Load[StoreConfig]("store", confmaker.WithDump(os.Stdout), confmaker.WithEnv(map[string]string{"STORE_HOST": "db:5432"}))
-
-	fmt.Println(err)
-
-	// Output:
-	// INSTANCE  VARIABLE       TYPE           VALUE    SOURCE
-	// store     STORE_HOST     string         db:5432  env
-	// store     STORE_TIMEOUT  time.Duration  30s      default
-	// <nil>
-}
-
 // The instance name stays primary while WithPrefix selects DATABASE_* variables.
 func ExampleWithPrefix() {
 	cfg, err := confmaker.Load[StoreConfig]("primary",
@@ -121,13 +110,17 @@ func ExampleWithPrefix() {
 	)
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
+
 	variables, err := confmaker.Manifest[StoreConfig]("primary", confmaker.WithPrefix("DATABASE_"))
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
+
 	fmt.Println(cfg.Host, variables[0].Name)
 
 	// Output:
@@ -143,8 +136,10 @@ func ExampleLoader_Manifest() {
 	configs, err := loader.Manifest()
 	if err != nil {
 		fmt.Println(err)
+
 		return
 	}
+
 	for _, config := range configs {
 		fmt.Println(config.InstanceName, config.Prefix)
 		for _, variable := range config.Variables {

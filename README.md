@@ -20,10 +20,11 @@ passes typed values to consumers. The core works independently of any framework;
 
 ## Installation
 
-Requires **Go 1.27 or later**. The command below installs the tagged release.
+Requires **Go 1.27 or later**. The command below installs the latest stable release.
+This README describes the current branch; for a pinned release, use its tagged documentation.
 
 ```sh
-go get github.com/uchaloop/confmaker@v0.8.0
+go get github.com/uchaloop/confmaker@latest
 ```
 
 ```go
@@ -131,7 +132,10 @@ checked under registered prefixes; unrelated ENV variables are ignored.
 
 `Load` runs once. Later calls return the same result. All handles remain
 unavailable until the whole set loads successfully. A failed configuration
-prevents values from being handed out for the entire set.
+prevents values from being handed out for the entire set. Register every config
+before loading: registrations attempted after `Load` starts return handles whose
+`Value()` reports `ErrRegisteredAfterLoad`. Before loading completes, existing
+handles return `ErrNotLoaded`.
 
 ## Names and multiple instances
 
@@ -146,10 +150,10 @@ The instance name is explicit and determines the default ENV prefix:
 Register the same type more than once under different names when configuring
 independent instances. Names contain lowercase letters, digits and `_`, `-`, `.`;
 they must start and end with a letter or digit. Names, resolved prefixes and
-full variable names must not collide. There is no implicit `ConfigName()` lookup.
+full variable names must not collide.
 
 `WithPrefix` changes ENV names, not the instance name. Config options apply to
-one registration; ENV options such as `WithEnv`, `WithDump` and `AllowUnknown`
+one registration; ENV options such as `WithEnv` and `AllowUnknown`
 apply to the loader.
 
 ## Configuration rules
@@ -164,9 +168,10 @@ apply to the loader.
 | `envDescription:"Database address"` | Description for manifest and exports |
 | `envSeparator:";"` | Separator for a plain slice or map; default `,` |
 | `envKeyValSeparator:"="` | Key/value separator for a plain map; default `:` |
-| `envFormat:"json"` | Read a structured value from one JSON variable |
+| `envFormat:"json"` | Read a slice, array or map from one JSON variable |
 
-Defaults belong in `SetDefaults`, not `envDefault` tags. Only the root config's
+Defaults belong in Go code, exposed through `SetDefaults`, not `envDefault` tags.
+Only the root config's
 `SetDefaults` and `Validate` methods run; explicitly compose nested defaults or
 validation there when needed. `Validate` runs only after all fields of that
 configuration parse successfully. There is no tag that makes all nested fields
@@ -176,13 +181,61 @@ Strings, bools, integers, floats, durations, text-unmarshalable types, scalar
 pointers, and supported slices/maps can be read in plain syntax. Examples:
 `30s`, `host-a,host-b`, `team:core,env:dev`.
 
-For structured data, a field such as
-`Endpoints []Endpoint` with `env:"ENDPOINTS" envFormat:"json"` reads one variable.
-A supplied JSON value replaces the whole default, rather than merging with it.
-JSON durations use strings such as `"30s"`. See [GoDoc](https://pkg.go.dev/github.com/uchaloop/confmaker)
-for JSON rules, custom types and supported shapes.
+For collections, use `Headers map[string]string` with
+`env:"HEADERS" envFormat:"json"`, for example `APP_HEADERS={"X-Service":"catalog"}`.
+Nested collections and scalar text types are supported; ordinary structs are
+rejected at every depth. Use `envPrefix` for nested configuration structs.
+JSON replaces the whole default, and durations use strings such as `"30s"`.
+Text types use JSON strings and `UnmarshalText` / `MarshalText`, even when they
+also implement JSON methods. Exporting a text default without `MarshalText`
+returns `ErrorDefaultRender`; loading remains available.
 
-## Errors and diagnostics
+## Defaults outside the loader
+
+For packages also used in tests or assembled without ENV, keep defaults in a
+factory and let `SetDefaults` delegate to it:
+
+```go
+type Config struct {
+    Host    string        `env:"HOST,notEmpty"`
+    Timeout time.Duration `env:"TIMEOUT"`
+}
+
+func DefaultConfig() Config {
+    return Config{Timeout: 30 * time.Second}
+}
+
+func (c *Config) SetDefaults() {
+    *c = DefaultConfig()
+}
+
+func (c Config) Validate() error {
+    if len(c.Host) == 0 {
+        return fmt.Errorf("host must not be empty")
+    }
+
+    if c.Timeout <= 0 {
+        return fmt.Errorf("timeout must be positive")
+    }
+
+    return nil
+}
+```
+
+This example uses `fmt` and `time` from the standard library. Outside confmaker,
+call `DefaultConfig()`, set application-specific fields and call `Validate()`.
+With confmaker, use `Load[Config]("postgres")` or register the type as usual;
+loading and manifest generation obtain defaults through `SetDefaults`.
+The factory is a package convention, not a function confmaker discovers.
+
+`Config{}` does not apply defaults. The assignment in `SetDefaults` replaces the
+whole config, so call it before applying overrides. Keep defaults deterministic
+and free of side effects: manifest generation evaluates them on fresh instances.
+The `required` and `notEmpty` tags constrain supplied ENV; `Validate` checks the
+resulting config regardless of how it was constructed, when called by the loader
+or explicitly by its caller.
+
+## Structured errors
 
 The original error is the complete result. Structured problems let callers
 inspect configuration failures without parsing messages:
@@ -204,15 +257,14 @@ the first `*confmaker.ConfigError`. `ConfigErrors` collects structured problems
 through wrappers and joins; a joined user `Validate` error remains one validation
 problem. Treat returned error pointers as read-only.
 
+Ordinary parser errors and user validation errors may include input values; use
+value-free load reports when logging values is inappropriate. Secret parse
+values and causes are suppressed.
+
 Original non-secret causes remain available through `errors.Is` and `errors.As`,
 including `strconv.ErrSyntax`, `strconv.ErrRange` and `*strconv.NumError`.
 Writer and lifecycle errors are separate, so always handle the original error
 even if `ConfigErrors` returns no entries.
-
-`confmaker.WithDump(writer)` prints values and their sources during loading.
-It runs before parsing/validation completes: a dump is diagnostic output, not
-proof of success. Secret types are masked. Ordinary strings and user validation
-messages are not automatically sanitized.
 
 ## Load reports
 
@@ -235,7 +287,8 @@ if err != nil {
 `LoadReport` contains registration names, types, field paths, sources, statuses
 and structured `LoadProblem` categories. It contains no values, defaults, error
 messages or error causes. The original error returned by `Load` remains unchanged.
-`WithDump` is different: it prints values of non-secret fields.
+Manifest exports may contain non-secret defaults. Keep credentials out of defaults
+and user-generated validation errors.
 
 | Source | Meaning |
 | --- | --- |
@@ -248,9 +301,7 @@ messages or error causes. The original error returned by `Load` remains unchange
 An explicit zero in `SetDefaults` is indistinguishable from an untouched zero.
 Field success means ENV application succeeded; `Validate` may still fail the
 config. Global problems can fail loading even when individual configs succeeded.
-`Problems` contains structured library errors; an unstructured error, such as a
-dump writer failure, can fail the load without adding a problem category. Writer
-error chains are not inspected; handle the original load error for those failures.
+`Problems` contains structured library errors without their messages or causes.
 
 All registrations are included, even invalid ones. Fields unavailable because
 schema compilation failed cannot be listed. Conflicts leave fields unprocessed.
@@ -282,6 +333,8 @@ Neither option logs automatically or terminates the process.
 
 Use `WithEnv` to replace the process environment with an isolated map. The map is
 copied when the option is created; `WithEnv(nil)` means an empty environment.
+There is no fallback to process ENV or merging of maps. Supply `WithEnv` once
+per loader; repeated options are declaration errors.
 
 ```go
 func TestStoreConfig(t *testing.T) {
@@ -316,20 +369,11 @@ Ordinary application loading does not require it.
 
 ### Use the same registrations
 
-After registration, choose either loading or description generation. For
-example, add this branch before `loader.Load()` in the quick start's `run`:
-
-```go
-if *showManifest {
-	return loader.WriteManifestMarkdown(os.Stdout)
-}
-```
-
-Define `showManifest` with `flag.Bool("manifest", false, "Print configuration documentation")`
-at package scope, import `flag` and `os`, and call `flag.Parse()` in `main` before
-`run`. Then `go run . -manifest` prints documentation without loading ENV or
-starting your services. Keep service construction after the normal load path.
-No second list of registrations is needed in this core-library example.
+Register configs once, then choose description or normal loading before creating
+services. The [CLI helper](#optional-cli-helper) below uses this same registration
+list and exits the description path before any ENV loading. Manifest generation
+is optional and does not consume the loader: it can also be used programmatically
+before or after loading.
 
 For programmatic access after registration:
 
@@ -352,7 +396,8 @@ The same names and options describe the same ENV variables.
 
 ### Optional CLI helper
 
-To avoid repeating format selection, register a helper on your FlagSet:
+Inside a function returning `error` (such as the quick start's `run`), use the
+following setup instead of its registration block. Import `flag` and `os`:
 
 ```go
 describe := confmaker.MakeDescribeFlag(flag.CommandLine)
@@ -365,7 +410,7 @@ loader.Register[JobConfig]("job")
 if describe.Requested() {
     return describe.Write(loader, os.Stdout)
 }
-// Continue with normal loading or pass the loader to confx.
+return loader.Load() // Or load and pass values to service constructors.
 ```
 
 Use `-describe=env`, `-describe=markdown` or `-describe=json`. Omission selects
@@ -425,7 +470,7 @@ by JSON itself; camelCase is this exporter's contract.
 ### Guarantees and boundaries
 
 - Configs are ordered by instance name; variables retain declaration order.
-- Manifest reads no ENV, calls no `Validate`, writes no dump and does not make
+- Manifest reads no ENV, calls no `Validate` and does not make
   handles ready. It can run before or after `Load`, including a failed load.
 - Each call evaluates fresh defaults and their marshalers. Keep those methods
   deterministic and free of side effects; concurrent calls require safe methods.
@@ -449,7 +494,7 @@ by JSON itself; camelCase is this exporter's contract.
 | Plain ENV maps reject pointer keys and non-reflexive keys such as `NaN` | Address identity or `NaN != NaN` would defeat duplicate checks; NaN values remain supported |
 | Map keys and values are not silently trimmed | Whitespace must not change configuration unnoticed |
 | Plain collection defaults cannot contain nil pointer chains or ambiguous separators | The description must not silently change their meaning |
-| Defaults with unrepresentable text can still load without `WithDump` | Normal loading does not need to render defaults |
+| Defaults with unrepresentable text can still load | Normal loading does not need to render defaults |
 | Loaded configs are read-only by convention | Returned structs may share maps, slices and pointers |
 | Unknown variables are checked only under registered prefixes | Unrelated process settings belong to other components; use `AllowUnknown` for explicit exceptions |
 
@@ -458,6 +503,7 @@ by JSON itself; camelCase is this exporter's contract.
 - [GoDoc](https://pkg.go.dev/github.com/uchaloop/confmaker): complete API and type rules.
 - [confx](https://github.com/uchaloop/confx): the Uber Fx adapter.
 - [Changelog](CHANGELOG.md): changes and migration notes.
+- [Contributing](CONTRIBUTING.md): project scope, development checks and contribution guidelines.
 
 ## Acknowledgements
 

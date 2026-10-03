@@ -28,13 +28,7 @@ var (
 // parser assigns the text of one variable to one value.
 type parser func(target reflect.Value, raw string) error
 
-// fieldParser returns the parser for a whole config field, or an error saying
-// why the field cannot be read from a variable.
-//
-// It is chosen once, when the schema is compiled, and the schema keeps it. That is
-// what makes a field of an unreadable type fail when it is registered rather than on the
-// first deployment that happens to set its variable, and it leaves one place
-// that decides what a type means.
+// fieldParser compiles the parser for one ENV field.
 func fieldParser(t reflect.Type, separator, keyValSeparator string) (parser, error) {
 	if t.Kind() != reflect.Slice && t.Kind() != reflect.Map {
 		return scalarParser(t)
@@ -169,6 +163,7 @@ func mapParser(t reflect.Type, separator, keyValSeparator string) (parser, error
 	return func(target reflect.Value, raw string) error {
 		if len(raw) == 0 {
 			target.Set(reflect.MakeMap(t))
+
 			return nil
 		}
 
@@ -307,9 +302,7 @@ func splitNonEmpty(raw, separator string) []string {
 	return strings.Split(raw, separator)
 }
 
-// checkUntrimmed rejects a map key or value padded with whitespace. Trimming it
-// away would silently accept "a: 1" as the value " 1"; reporting it lets the
-// deployment fix what it meant to write.
+// checkUntrimmed rejects surrounding whitespace in map keys and values.
 func checkUntrimmed(part, kind string) error {
 	if part != strings.TrimSpace(part) {
 		return fmt.Errorf("%s %q is padded with whitespace", kind, part)
@@ -327,6 +320,7 @@ func addressableValue(value reflect.Value) reflect.Value {
 
 	addressable := reflect.New(value.Type()).Elem()
 	addressable.Set(value)
+
 	return addressable
 }
 
@@ -337,7 +331,11 @@ func textOf(value reflect.Value) (string, bool, error) {
 
 	if marshaler, ok := reflect.TypeAssert[encoding.TextMarshaler](value.Addr()); ok {
 		text, err := marshaler.MarshalText()
-		return string(text), true, err
+		if err != nil {
+			return string(text), true, err
+		}
+
+		return string(text), true, nil
 	}
 
 	return "", false, nil
@@ -357,7 +355,11 @@ func renderValue(value reflect.Value, separator, keyValSeparator string) (string
 
 	if declaresTextForm(value.Type()) {
 		if text, ok, err := textOf(value); ok {
-			return text, err
+			if err != nil {
+				return text, err
+			}
+
+			return text, nil
 		}
 
 		return "", fmt.Errorf("%s implements TextUnmarshaler but not TextMarshaler", value.Type())

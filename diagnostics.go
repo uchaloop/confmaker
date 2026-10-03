@@ -51,7 +51,7 @@ const (
 // causes. Configs include invalid registrations, whose fields may be unavailable.
 // Successful fields do not imply successful config validation or loading.
 // After a panic, completed stages retain their problems; the interrupted stage
-// may be incomplete. Dump writer error chains are not inspected.
+// may be incomplete.
 type LoadReport struct {
 	State    LoadState
 	Configs  []ConfigReport
@@ -100,9 +100,11 @@ func MakeDiagnostics() *Diagnostics { return &Diagnostics{} }
 // Reading a report never loads configs or waits for user callbacks.
 func (d *Diagnostics) Report() LoadReport {
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	report := d.report
+	d.mu.Unlock()
 
-	report := cloneLoadReport(d.report)
+	// Published reports are immutable; copy outside the lock.
+	report = cloneLoadReport(report)
 	if len(report.State) == 0 {
 		report.State = LoadNotStarted
 	}
@@ -117,16 +119,19 @@ func (d *Diagnostics) bindLoader(loader *Loader) error {
 	if d.owner != nil && d.owner != loader {
 		return makeConfigError(ErrorDeclaration, "", "", errors.New("diagnostics already belongs to another loader"))
 	}
+
 	d.owner = loader
 
 	return nil
 }
 
+// publishReport takes ownership of report. Neither the caller nor a handler may
+// mutate its slices after publication; public readers receive independent copies.
 func (d *Diagnostics) publishReport(report LoadReport) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	d.report = cloneLoadReport(report)
+	d.report = report
 }
 
 func cloneLoadReport(report LoadReport) LoadReport {
@@ -134,6 +139,7 @@ func cloneLoadReport(report LoadReport) LoadReport {
 	for i := range report.Configs {
 		report.Configs[i].Variables = slices.Clone(report.Configs[i].Variables)
 	}
+
 	report.Problems = slices.Clone(report.Problems)
 
 	return report
@@ -145,6 +151,7 @@ func WithDiagnostics(diagnostics *Diagnostics) EnvOption {
 	return envOption(func(s *envSettings) {
 		if diagnostics == nil || s.diagnostics != nil {
 			s.diagnosticErr = makeConfigError(ErrorDeclaration, "", "", errors.New("WithDiagnostics requires one non-nil receiver"))
+
 			return
 		}
 
@@ -163,6 +170,7 @@ func WithDiagnosticHandler(handler func(LoadReport)) EnvOption {
 	return envOption(func(s *envSettings) {
 		if handler == nil || s.diagnosticHandler != nil {
 			s.diagnosticErr = makeConfigError(ErrorDeclaration, "", "", errors.New("WithDiagnosticHandler requires one non-nil handler"))
+
 			return
 		}
 
@@ -186,13 +194,17 @@ func makeLoadReport(registrations []*registration) *LoadReport {
 			configReport.Status = ConfigFailed
 		}
 
-		for _, field := range registration.fields {
-			configReport.Variables = append(configReport.Variables, VariableReport{
+		if len(registration.fields) != 0 {
+			configReport.Variables = make([]VariableReport, len(registration.fields))
+		}
+
+		for index, field := range registration.fields {
+			configReport.Variables[index] = VariableReport{
 				Name:      field.Name,
 				FieldPath: field.field,
 				Source:    SourceUnknown,
 				Status:    VariableNotProcessed,
-			})
+			}
 		}
 
 		report.Configs[i] = configReport
@@ -212,9 +224,7 @@ func setLoadReportState(report *LoadReport, err error) {
 	}
 }
 
-// recordLoadProblems traverses only library-owned wrappers and joins. In
-// particular, a dump writer's wrapped error is not inspected: its Unwrap may
-// execute user code, and its metadata does not describe configuration fields.
+// recordLoadProblems collects library problems without inspecting user causes.
 func recordLoadProblems(report *LoadReport, err error) {
 	switch problem := err.(type) {
 	case *ConfigError:
@@ -224,9 +234,11 @@ func recordLoadProblems(report *LoadReport, err error) {
 
 		if len(problem.InstanceName) != 0 {
 			for i := range report.Configs {
-				if report.Configs[i].InstanceName == problem.InstanceName {
-					report.Configs[i].Status = ConfigFailed
+				if report.Configs[i].InstanceName != problem.InstanceName {
+					continue
 				}
+
+				report.Configs[i].Status = ConfigFailed
 			}
 		}
 

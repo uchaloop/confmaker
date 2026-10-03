@@ -1,7 +1,6 @@
 package confmaker
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"reflect"
@@ -256,12 +255,10 @@ func TestNestedStructPrefix(t *testing.T) {
 		MaxConns int32 `env:"MAX_CONNS"`
 	}
 
-	type config struct {
+	got, err := Load[struct {
 		Host string     `env:"HOST"`
 		Pool poolConfig `envPrefix:"POOL_"`
-	}
-
-	got, err := Load[config]("confxpostgres", WithEnv(env))
+	}]("confxpostgres", WithEnv(env))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -279,14 +276,12 @@ func TestSecretWithoutEnvTagStaysZero(t *testing.T) {
 		"CUSTOM_PASSWORD": "from-env",
 	}
 
-	type config struct {
+	got, err := Load[struct {
 		Endpoint    string        `env:"ENDPOINT,required"`
 		FromEnv     secret.Secret `env:"PASSWORD"`
 		WithoutEnv  secret.Secret `json:"password" yaml:"password"`
 		WithoutTags secret.Secret
-	}
-
-	got, err := Load[config]("ignored", WithEnv(env), WithPrefix("CUSTOM_"))
+	}]("ignored", WithEnv(env), WithPrefix("CUSTOM_"))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -375,11 +370,9 @@ func TestNotEmptyRejectsAnEmptyVariable(t *testing.T) {
 		"CONFXAPP_HOST": "",
 	}
 
-	type config struct {
+	_, err := Load[struct {
 		Host string `env:"HOST,notEmpty"`
-	}
-
-	_, err := Load[config]("confxapp", WithEnv(env))
+	}]("confxapp", WithEnv(env))
 	if err == nil {
 		t.Fatal("an empty value passed notEmpty")
 	}
@@ -411,12 +404,10 @@ func TestLoadReportsEveryFieldProblemAtOnce(t *testing.T) {
 		"CONFXAPP_RETRIES": "many",
 	}
 
-	type config struct {
+	_, err := Load[struct {
 		Host    string `env:"HOST,required"`
 		Retries int    `env:"RETRIES"`
-	}
-
-	_, err := Load[config]("confxapp", WithEnv(env))
+	}]("confxapp", WithEnv(env))
 	if err == nil {
 		t.Fatal("expected both problems to fail the build")
 	}
@@ -433,11 +424,9 @@ func TestSecretReadsAnyText(t *testing.T) {
 		"CONFXAPP_COUNT": "s3cr3t",
 	}
 
-	type config struct {
+	cfg, err := Load[struct {
 		Count secret.Secret `env:"COUNT"`
-	}
-
-	cfg, err := Load[config]("confxapp", WithEnv(env))
+	}]("confxapp", WithEnv(env))
 	if err != nil {
 		t.Fatalf("a secret decodes any text: %v", err)
 	}
@@ -447,49 +436,30 @@ func TestSecretReadsAnyText(t *testing.T) {
 	}
 }
 
-// TestConfigErrorNamesEveryLine covers what the label exists for: a stage joins
-// its problems, the join renders one per line, and a line read on its own still
-// says which config it belongs to.
-func TestConfigErrorNamesEveryLine(t *testing.T) {
-	err := wrapConfigError("store", errors.Join(
-		errors.New("first problem"),
-		errors.New("second problem"),
-	))
+var poolValidationCause = errors.New("min_conns exceeds max_conns")
 
-	want := `config "store": first problem` + "\n" + `config "store": second problem`
-	if err.Error() != want {
-		t.Fatalf("got:\n%s\nwant:\n%s", err.Error(), want)
-	}
+type poolValidationConfig struct{}
+
+func (poolValidationConfig) Validate() error {
+	return fmt.Errorf("pool: %w", errors.Join(
+		errors.New("max_conns must be positive"),
+		poolValidationCause,
+	))
 }
 
-// TestConfigErrorKeepsTheStagesOwnContext covers a join a stage wrapped in
-// context of its own. Labelling the errors behind the join would report the
-// name and drop the "pool:" that says where in the config the problem is.
-func TestConfigErrorKeepsTheStagesOwnContext(t *testing.T) {
-	err := wrapConfigError("store", fmt.Errorf("pool: %w", errors.Join(
-		errors.New("max_conns must be positive"),
-		errors.New("min_conns exceeds max_conns"),
-	)))
+func TestLoadPreservesValidationContextAndCause(t *testing.T) {
+	_, err := Load[poolValidationConfig]("store", WithEnv(nil))
+	if !errors.Is(err, poolValidationCause) {
+		t.Fatal("validation cause was lost", err)
+	}
 
-	for _, want := range []string{
+	for _, expected := range []string{
 		`config "store": pool: max_conns must be positive`,
 		`config "store": min_conns exceeds max_conns`,
 	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("got:\n%s\nwant a line %q", err.Error(), want)
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("missing %q in %v", expected, err)
 		}
-	}
-}
-
-// TestConfigErrorStaysInspectable keeps errors.Is reaching through the label and
-// into the join behind it, so a caller can still recognise what a stage
-// reported.
-func TestConfigErrorStaysInspectable(t *testing.T) {
-	sentinel := errors.New("sentinel")
-
-	err := wrapConfigError("store", errors.Join(errors.New("other"), sentinel))
-	if !errors.Is(err, sentinel) {
-		t.Fatal("errors.Is does not reach the error behind the label")
 	}
 }
 
@@ -503,14 +473,13 @@ func (c *loadConfigType) SetDefaults() { c.Port = 5432 }
 func TestLoadTakesBothKindsOfOption(t *testing.T) {
 	t.Parallel()
 
-	var out bytes.Buffer
-	cfg, err := Load[loadConfigType]("confxreplica", WithEnv(map[string]string{"CONFXREPLICA_HOST": "replica"}), WithPrefix("CONFXREPLICA_"), WithDump(&out))
+	cfg, err := Load[loadConfigType]("confxreplica", WithEnv(map[string]string{"CONFXREPLICA_HOST": "replica"}), WithPrefix("CONFXREPLICA_"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if cfg.Host != "replica" || cfg.Port != 5432 || !strings.Contains(out.String(), "confxreplica") {
-		t.Fatalf("got %+v, dump:\n%s", cfg, out.String())
+	if cfg.Host != "replica" || cfg.Port != 5432 {
+		t.Fatalf("got %+v", cfg)
 	}
 }
 

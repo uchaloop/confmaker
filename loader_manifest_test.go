@@ -1,7 +1,6 @@
 package confmaker
 
 import (
-	"bytes"
 	"errors"
 	"reflect"
 	"strings"
@@ -30,14 +29,17 @@ func TestLoaderManifestMatchesSingleConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	primary, err := Manifest[manifestConfig]("primary")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	replica, err := Manifest[manifestConfig]("replica", WithPrefix("CUSTOM_"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	want := []ConfigManifest{
 		{InstanceName: "primary", Prefix: "PRIMARY_", Variables: primary},
 		{InstanceName: "replica", Prefix: "CUSTOM_", Variables: replica},
@@ -49,22 +51,19 @@ func TestLoaderManifestMatchesSingleConfig(t *testing.T) {
 
 func TestLoaderManifestDoesNotUseLoadOptionsOrValidate(t *testing.T) {
 	t.Parallel()
-	var dump bytes.Buffer
-	loader := MakeLoader(WithEnv(map[string]string{"APP_HOST": "env", "APP_TYPO": "x"}), WithDump(&dump))
+	loader := MakeLoader(WithEnv(map[string]string{"APP_HOST": "env", "APP_TYPO": "x"}))
 	handle := loader.Register[manifestOnlyConfig]("app")
 	got, err := loader.Manifest()
 	if err != nil || len(got) != 1 || len(got[0].Variables[0].Default) != 0 {
 		t.Fatalf("manifest: %v, %v", got, err)
 	}
+
 	invalidOptions := MakeLoader(nil, WithEnv(nil), WithEnv(nil))
 	invalidOptions.Register[manifestOnlyConfig]("app")
 	if _, err := invalidOptions.Manifest(); err != nil {
 		t.Fatalf("load options affected manifest: %v", err)
 	}
 
-	if dump.Len() != 0 {
-		t.Fatal("manifest wrote a dump")
-	}
 	if _, err := handle.Value(); !errors.Is(err, ErrNotLoaded) {
 		t.Fatalf("handle: %v", err)
 	}
@@ -83,20 +82,24 @@ func TestLoaderManifestKeepsDefaultsSeparateFromLoadedValues(t *testing.T) {
 	if err := loader.Load(); err != nil {
 		t.Fatal(err)
 	}
+
 	cfg, err := handle.Value()
 	if err != nil || len(cfg.Items) != 1 || cfg.Items[0] != "loaded" {
 		t.Fatalf("loaded: %+v, %v", cfg, err)
 	}
+
 	cfg.Items[0] = "mutated"
 	after, err := loader.Manifest()
 	if err != nil || len(after) != 2 || !reflect.DeepEqual(before[0], after[0]) {
 		t.Fatalf("manifest changed: %v, %v", after, err)
 	}
+
 	after[0].Variables[0].Name = "MUTATED"
 	again, err := loader.Manifest()
 	if err != nil || !reflect.DeepEqual(before[0], again[0]) {
 		t.Fatalf("manifest shares result storage: %v, %v", again, err)
 	}
+
 	cfg, err = handle.Value()
 	if err != nil || cfg.Items[0] != "mutated" {
 		t.Fatalf("manifest changed loaded config: %+v, %v", cfg, err)
@@ -142,9 +145,11 @@ func TestLoaderManifestReportsAllRenderErrorsAndDoesNotPreventLoad(t *testing.T)
 	if got != nil || !errors.Is(err, errMarshalDefault) {
 		t.Fatalf("got %v, %v", got, err)
 	}
+
 	if !strings.Contains(err.Error(), `config "a"`) || !strings.Contains(err.Error(), `config "z"`) || strings.Index(err.Error(), `config "a"`) > strings.Index(err.Error(), `config "z"`) {
 		t.Fatalf("report: %v", err)
 	}
+
 	if err := loader.Load(); err != nil {
 		t.Fatalf("manifest failure poisoned load: %v", err)
 	}
@@ -158,10 +163,12 @@ func TestLoaderManifestAfterFailedLoad(t *testing.T) {
 	if loadErr == nil {
 		t.Fatal("expected missing required variable")
 	}
+
 	got, err := loader.Manifest()
 	if err != nil || len(got) != 1 {
 		t.Fatalf("manifest: %v, %v", got, err)
 	}
+
 	if _, err := handle.Value(); err != loadErr {
 		t.Fatalf("load result changed: %v", err)
 	}
@@ -202,11 +209,13 @@ func TestLoaderManifestSnapshotsBeforeCallingUserCode(t *testing.T) {
 		if _, err := handle.Value(); !errors.Is(err, ErrNotLoaded) {
 			t.Fatalf("handle: %v", err)
 		}
+
 		close(resume)
 		<-done
 		if manifestErr != nil || len(got) != 1 {
 			t.Fatalf("snapshot: %v, %v", got, manifestErr)
 		}
+
 		var group sync.WaitGroup
 		for range 8 {
 			group.Go(func() {
@@ -216,6 +225,7 @@ func TestLoaderManifestSnapshotsBeforeCallingUserCode(t *testing.T) {
 				}
 			})
 		}
+
 		group.Go(func() {
 			if err := loader.Load(); err != nil {
 				t.Errorf("load: %v", err)
