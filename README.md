@@ -504,6 +504,7 @@ by JSON itself; camelCase is this exporter's contract.
 - [confx](https://github.com/uchaloop/confx): the Uber Fx adapter.
 - [Changelog](CHANGELOG.md): changes and migration notes.
 - [Contributing](CONTRIBUTING.md): project scope, development checks and contribution guidelines.
+- [Security policy](SECURITY.md): private vulnerability reporting and supported versions.
 
 ## Acknowledgements
 

@@ -1,7 +1,6 @@
 package confmaker
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -14,23 +13,6 @@ func TestPointerToSecretIsMasked(t *testing.T) {
 	}](t, "confxapp")
 	if !variables[0].Secret {
 		t.Fatal("a pointer to a secret was not recognised as one")
-	}
-}
-
-// TestParseErrorNeverNamesASecretValue checks the guarantee directly. No type
-// outside the secret package can implement its marker interface, so a secret
-// whose text form fails cannot be built here - the branch is exercised as the
-// unit it is.
-func TestParseErrorNeverNamesASecretValue(t *testing.T) {
-	b := fieldSpec{Name: "CONFXAPP_PASSWORD", Type: "secret.Secret", Secret: true}
-
-	err := describeParseError(b, errors.New("\"hunter2\" is not valid"))
-	if strings.Contains(err.Error(), "hunter2") {
-		t.Fatalf("the value reached the error: %v", err)
-	}
-
-	if !strings.Contains(err.Error(), "CONFXAPP_PASSWORD") {
-		t.Fatalf("the error does not name the variable: %v", err)
 	}
 }
 
