@@ -4,6 +4,8 @@ Bug fixes, documentation improvements and focused feature proposals are welcome.
 Discuss new features and incompatible changes in an issue before implementing them.
 For bug reports, include a minimal reproduction, the Go and confmaker versions,
 and the expected and actual behavior. Use synthetic configuration values.
+For suspected vulnerabilities, follow [SECURITY.md](SECURITY.md) instead of
+opening a public issue with disclosure details.
 
 ## Project scope
 

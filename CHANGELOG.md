@@ -7,6 +7,15 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-03
+
+- Set the minimum Go version to 1.27.0; CI uses the latest Go 1.27 patch release.
+
+- Updated `secret/v2` to v2.1.0 to fix disclosure through nested formatting and logging.
+  **Compatibility:** `Secret` is no longer comparable; JSON `null` now clears it.
+- Added integration tests for secret loading, manifest redaction and safe parse errors.
+- Added a security policy; only the latest stable release is supported.
+
 ## [1.0.0] - 2026-10-03
 
 - First stable release of the explicit ENV configuration API, manifest and diagnostics.
@@ -372,7 +381,8 @@ its only dependencies.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/uchaloop/confmaker/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/uchaloop/confmaker/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/uchaloop/confmaker/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/uchaloop/confmaker/compare/v0.7.0...v0.8.0

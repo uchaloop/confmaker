@@ -20,7 +20,7 @@ passes typed values to consumers. The core works independently of any framework;
 
 ## Installation
 
-Requires **Go 1.27 or later**. The command below installs the latest stable release.
+Requires **Go 1.27.0 or later**. The command below installs the latest stable release.
 This README describes the current branch; for a pinned release, use its tagged documentation.
 
 ```sh
@@ -504,6 +504,7 @@ by JSON itself; camelCase is this exporter's contract.
 - [confx](https://github.com/uchaloop/confx): the Uber Fx adapter.
 - [Changelog](CHANGELOG.md): changes and migration notes.
 - [Contributing](CONTRIBUTING.md): project scope, development checks and contribution guidelines.
+- [Security policy](SECURITY.md): private vulnerability reporting and supported versions.
 
 ## Acknowledgements
 
