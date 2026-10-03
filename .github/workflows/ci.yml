@@ -13,6 +13,9 @@ on:
 
   workflow_dispatch:
   workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -52,4 +55,14 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -race ./...
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        timeout-minutes: 2
+        continue-on-error: true
+        with:
+          files: ./coverage.out
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
