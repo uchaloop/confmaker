@@ -21,7 +21,7 @@ func (c *strictConfig) SetDefaults() {
 }
 
 // loadStrict loads the strictConfig instance "confxpostgres" from env.
-func loadStrict(env map[string]string, opts ...EnvOption) error {
+func loadStrict(env map[string]string, opts ...LoaderOption) error {
 	loadOpts := []LoadOption{WithEnv(env)}
 	for _, opt := range opts {
 		loadOpts = append(loadOpts, opt)

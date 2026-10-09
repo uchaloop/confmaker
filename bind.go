@@ -1,6 +1,7 @@
 package confmaker
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -233,8 +234,15 @@ func compileField(
 // validates the result. Validate runs only when every variable parsed: a
 // half-filled config would report problems that are not there.
 func applyAndValidate[T any](cfg *T, fields []fieldSpec, name string, env environment, report *ConfigReport, onPanic func(error)) error {
+	return applyAndValidateContext(context.Background(), cfg, fields, name, env, report, onPanic)
+}
+func applyAndValidateContext[T any](ctx context.Context, cfg *T, fields []fieldSpec, name string, env environment, report *ConfigReport, onPanic func(error)) error {
 	if err := applyEnvironment(reflect.ValueOf(cfg).Elem(), fields, env, report, onPanic); err != nil {
 		return wrapConfigError(name, err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Check cfg (a *T), not *cfg: *T's method set includes both value- and

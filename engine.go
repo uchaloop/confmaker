@@ -97,6 +97,9 @@ func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *L
 	}
 	configs := make([]any, len(regs))
 	for i, r := range regs {
+		if ctx.Err() != nil {
+			return errors.Join(append(errs, ctx.Err())...)
+		}
 		if report != nil {
 			report.Configs[i].Status = ConfigInterrupted
 		}
@@ -106,11 +109,14 @@ func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *L
 		}
 	}
 	for i, r := range regs {
+		if ctx.Err() != nil {
+			return errors.Join(append(errs, ctx.Err())...)
+		}
 		if report != nil {
 			report.Configs[i].Status = ConfigInterrupted
 		}
 		err := r.fillEngine(ctx, l.env.engine, configs[i])
-		if report != nil {
+		if report != nil && ctx.Err() == nil {
 			report.Configs[i].Status = ConfigSucceeded
 			if err != nil {
 				report.Configs[i].Status = ConfigFailed

@@ -7,7 +7,7 @@ import (
 
 type testLoader struct{ *c.Loader }
 
-func makeTestLoader(opts ...c.EnvOption) *testLoader { return &testLoader{c.MakeLoader(opts...)} }
+func makeTestLoader(opts ...c.LoaderOption) *testLoader { return &testLoader{c.MakeLoader(opts...)} }
 func (l *testLoader) WriteEnvExample(w io.Writer) error {
 	r, e := l.Manifest(c.IncludeDefaults())
 	if e != nil {

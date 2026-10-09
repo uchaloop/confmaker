@@ -151,7 +151,7 @@ func TestDiagnosticConflictAndInvalidRegistration(t *testing.T) {
 }
 
 func TestDiagnosticOptions(t *testing.T) {
-	for _, opts := range [][]EnvOption{{WithDiagnosticHandler(nil)}, {WithDiagnosticHandler(func(LoadReport) {}), WithDiagnosticHandler(func(LoadReport) {})}} {
+	for _, opts := range [][]LoaderOption{{WithDiagnosticHandler(nil)}, {WithDiagnosticHandler(func(LoadReport) {}), WithDiagnosticHandler(func(LoadReport) {})}} {
 		if p := ConfigErrors(MakeLoader(opts...).Load()); len(p) == 0 || p[0].Kind != ErrorDeclaration {
 			t.Fatal(p)
 		}

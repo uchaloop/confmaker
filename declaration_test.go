@@ -344,7 +344,7 @@ func TestAnEnvPrefixThatExtendsNothingIsRefused(t *testing.T) {
 	})
 }
 
-func TestUnknownEnvOptionIsRefused(t *testing.T) {
+func TestUnknownLoaderOptionIsRefused(t *testing.T) {
 	cases := map[string]string{
 		"misspelled required": "HOST,requred",
 		"wrong case":          "HOST,notempty",
