@@ -83,7 +83,7 @@ func TestInvalidDeclarationFailsBeforeDefaults(t *testing.T) {
 		t.Fatal("invalid config accepted")
 	}
 
-	if _, err := Manifest[invalidDefaults]("confxschema"); err == nil {
+	if _, err := singleManifestForTest[invalidDefaults]("confxschema"); err == nil {
 		t.Fatal("invalid manifest accepted")
 	}
 }

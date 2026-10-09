@@ -10,14 +10,15 @@ import (
 // fieldSpec describes a leaf without holding a config value or rendered default.
 // A registration shares this immutable schema between loading and inspection.
 type fieldSpec struct {
-	Name, Type       string
-	Description      string
-	Required, Secret bool
-	NotEmpty         bool
-	field            string
-	index            []int
-	render           renderer
-	parse            parser
+	Name, Type                         string
+	format, separator, keyValSeparator string
+	Description                        string
+	Required, Secret                   bool
+	NotEmpty                           bool
+	field                              string
+	index                              []int
+	render                             renderer
+	parse                              parser
 }
 
 // prepareConfig validates registration options and compiles the schema before
@@ -200,7 +201,27 @@ func compileField(
 		return fieldSpec{}, fmt.Errorf("field %s: %w", fieldPath, err)
 	}
 
+	format := field.Tag.Get("envFormat")
+	if format == "" {
+		format = "plain"
+	}
+	sep, kv := "", ""
+	if format == "plain" && !declaresTextForm(field.Type) {
+		if field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Map {
+			sep = field.Tag.Get("envSeparator")
+			if sep == "" {
+				sep = defaultSeparator
+			}
+		}
+		if field.Type.Kind() == reflect.Map {
+			kv = field.Tag.Get("envKeyValSeparator")
+			if kv == "" {
+				kv = defaultKeyValSeparator
+			}
+		}
+	}
 	return fieldSpec{
+		format: format, separator: sep, keyValSeparator: kv,
 		Name: fullName, Type: field.Type.String(), Description: field.Tag.Get("envDescription"),
 		Required: opts.required || opts.notEmpty, NotEmpty: opts.notEmpty, Secret: secret,
 		field: fieldPath, index: index, parse: codec.parse,

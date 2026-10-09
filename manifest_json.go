@@ -38,13 +38,13 @@ type variableJSON struct {
 // loaded. Manifest and encoding errors leave writer untouched. Writer errors
 // are returned and may leave partial output. The caller owns file handling.
 func (l *Loader) WriteManifestJSON(writer io.Writer) error {
-	configs, err := l.Manifest()
+	configs, err := l.Manifest(IncludeDefaults())
 	if err != nil {
 		return err
 	}
 
-	document := manifestJSON{Version: 1, Configs: make([]configManifestJSON, 0, len(configs))}
-	for _, config := range configs {
+	document := manifestJSON{Version: 1, Configs: make([]configManifestJSON, 0, len(configs.Configs))}
+	for _, config := range configs.Configs {
 		entry := configManifestJSON{
 			InstanceName: config.InstanceName, Prefix: config.Prefix,
 			Variables: make([]variableJSON, 0, len(config.Variables)),
@@ -54,10 +54,10 @@ func (l *Loader) WriteManifestJSON(writer io.Writer) error {
 			field := variableJSON{
 				Name: variable.Name, Description: variable.Description, Type: variable.Type,
 				Required: variable.Required, NotEmpty: variable.NotEmpty, Secret: variable.Secret,
-				HasDefault: variable.HasDefault,
+				HasDefault: (variable.Default.State == DefaultRendered),
 			}
 			if !variable.Secret {
-				field.Default = &variable.Default
+				field.Default = &variable.Default.Text
 			}
 
 			entry.Variables = append(entry.Variables, field)

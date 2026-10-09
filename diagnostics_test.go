@@ -244,7 +244,7 @@ func TestDiagnosticsDoNotRepeatProcessing(t *testing.T) {
 	loader := MakeLoader(WithDiagnostics(), WithEnv(nil))
 	handle := loader.Register[diagnosticDefaultsConfig]("app")
 
-	if _, err := loader.Manifest(); err != nil {
+	if _, err := loaderManifestForTest(loader); err != nil {
 		t.Fatal(err)
 	}
 

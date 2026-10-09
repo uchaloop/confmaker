@@ -21,13 +21,13 @@ import (
 // may leave partial output. Defaults and marshalers have the same lifecycle as
 // Manifest. Secret values are never rendered.
 func (l *Loader) WriteEnvExample(writer io.Writer) error {
-	manifest, err := l.Manifest()
+	manifest, err := l.Manifest(IncludeDefaults())
 	if err != nil {
 		return err
 	}
 
 	var output strings.Builder
-	for _, config := range manifest {
+	for _, config := range manifest.Configs {
 		fmt.Fprintf(&output, "# Configuration: %q\n", config.InstanceName)
 
 		for _, variable := range config.Variables {
@@ -48,8 +48,8 @@ func (l *Loader) WriteEnvExample(writer io.Writer) error {
 			switch {
 			case !isEnvExampleVariableName(variable.Name):
 				fmt.Fprintf(&output, "# Variable %q: set through your environment.\n", variable.Name)
-			case !variable.Secret && variable.HasDefault && !variable.complexDefault && isEnvExampleDefaultSafe(variable.Default):
-				fmt.Fprintf(&output, "%s=%s\n", variable.Name, variable.Default)
+			case !variable.Secret && (variable.Default.State == DefaultRendered) && isEnvExampleDefaultSafe(variable.Default.Text):
+				fmt.Fprintf(&output, "%s=%s\n", variable.Name, variable.Default.Text)
 			default:
 				fmt.Fprintf(&output, "# %s=\n", variable.Name)
 			}

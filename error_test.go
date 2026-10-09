@@ -68,7 +68,7 @@ func TestStructuredValidationCause(t *testing.T) {
 }
 
 func TestStructuredDeclarationsAndConflicts(t *testing.T) {
-	_, err := Manifest[struct {
+	_, err := singleManifestForTest[struct {
 		One string `env:"ONE,unsupported"`
 		Two string `env:"TWO" envPrefix:"BAD_"`
 	}]("app")
@@ -83,7 +83,7 @@ func TestStructuredDeclarationsAndConflicts(t *testing.T) {
 		}
 	}
 
-	_, err = Manifest[struct {
+	_, err = singleManifestForTest[struct {
 		One string `env:"VALUE"`
 		Two string `env:"VALUE"`
 	}]("app")
@@ -95,7 +95,7 @@ func TestStructuredDeclarationsAndConflicts(t *testing.T) {
 	loader := MakeLoader()
 	loader.Register[struct{}]("app")
 	loader.Register[struct{}]("app")
-	_, err = loader.Manifest()
+	_, err = loaderManifestForTest(loader)
 	problems = ConfigErrors(err)
 	if len(problems) != 2 {
 		t.Fatalf("registration conflicts: %v", err)
@@ -107,7 +107,7 @@ func TestStructuredDeclarationsAndConflicts(t *testing.T) {
 		}
 	}
 
-	_, err = Manifest[int]("app")
+	_, err = singleManifestForTest[int]("app")
 	problems = ConfigErrors(err)
 	if len(problems) != 1 || problems[0].Kind != ErrorDeclaration || problems[0].InstanceName != "app" {
 		t.Fatalf("type: %v", err)
@@ -161,16 +161,9 @@ func (*failingDefaultText) UnmarshalText([]byte) error  { return nil }
 func (failingDefaultText) MarshalText() ([]byte, error) { return nil, defaultRenderCause }
 
 func TestStructuredDefaultRender(t *testing.T) {
-	_, err := Manifest[struct {
-		Value failingDefaultText `env:"VALUE"`
-	}]("app")
-	problems := ConfigErrors(err)
-	if len(problems) != 1 || problems[0].Kind != ErrorDefaultRender || problems[0].FieldPath != "Value" || problems[0].InstanceName != "app" {
-		t.Fatalf("render: %v", err)
-	}
-
-	if !errors.Is(err, defaultRenderCause) {
-		t.Fatal("render cause lost")
+	r, err := Manifest[brokenTextConfig]("app", IncludeDefaults())
+	if err != nil || len(r.Problems) != 1 || r.Problems[0].Kind != ErrorDefaultRender || r.Problems[0].FieldPath != "Value" || r.Problems[0].InstanceName != "app" {
+		t.Fatalf("%+v %v", r, err)
 	}
 }
 

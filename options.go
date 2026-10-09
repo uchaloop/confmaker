@@ -15,6 +15,7 @@ type LoadOption interface {
 // ConfigOption configures one config with [WithPrefix]. [Loader.Register],
 // [Manifest] and [Load] take it.
 type ConfigOption interface {
+	DescribeOption
 	LoadOption
 	applyConfig(*configSettings)
 }
@@ -46,6 +47,7 @@ type envSettings struct {
 type configOption func(*configSettings)
 
 func (o configOption) applyConfig(s *configSettings) { o(s) }
+func (configOption) describeOption()                 {}
 func (configOption) loadOption()                     {}
 
 type envOption func(*envSettings)

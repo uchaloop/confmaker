@@ -53,7 +53,7 @@ func TestWriteManifestJSON(t *testing.T) {
 		t.Fatalf("secret metadata: %#v", fields[3])
 	}
 
-	if fields[1]["hasDefault"] != false || fields[1]["default"] != "0" {
+	if fields[1]["hasDefault"] != false || fields[1]["default"] != "" {
 		t.Fatalf("zero metadata: %#v", fields[1])
 	}
 
@@ -163,7 +163,7 @@ func ExampleLoader_WriteManifestMarkdown() {
 	// | `API_URL` | `string` | Required, non-empty | No | — | Service endpoint |
 }
 
-func TestManifestExportRenderErrorWritesNothing(t *testing.T) {
+func TestManifestExportRetainsSchema(t *testing.T) {
 	loader := MakeLoader()
 	loader.Register[struct {
 		Value failingDefaultText `env:"VALUE"`
@@ -171,7 +171,7 @@ func TestManifestExportRenderErrorWritesNothing(t *testing.T) {
 	for _, write := range []func(io.Writer) error{loader.WriteManifestJSON, loader.WriteManifestMarkdown} {
 		var output bytes.Buffer
 		err := write(&output)
-		if !errors.Is(err, defaultRenderCause) || output.Len() != 0 {
+		if err != nil || output.Len() == 0 {
 			t.Fatalf("render failure: %v, %q", err, &output)
 		}
 	}

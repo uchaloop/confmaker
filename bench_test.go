@@ -47,7 +47,7 @@ func BenchmarkManifest(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := Manifest[benchConfig]("confxbench"); err != nil {
+		if _, err := singleManifestForTest[benchConfig]("confxbench"); err != nil {
 			b.Fatal(err)
 		}
 	}

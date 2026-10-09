@@ -121,7 +121,7 @@ func rejectJSONType[T any](t *testing.T) {
 	loader.Register[struct {
 		Value T `env:"VALUE" envFormat:"json"`
 	}]("app")
-	_, manifestErr := loader.Manifest()
+	_, manifestErr := loaderManifestForTest(loader)
 
 	for _, err := range []error{loader.Load(), manifestErr} {
 		problems := ConfigErrors(err)
@@ -169,14 +169,16 @@ func TestJSONCustomTextAndManifestRoundTrip(t *testing.T) {
 		t.Fatal(text, err)
 	}
 
-	variables, err := Manifest[jsonCollectionConfig]("app")
+	variables, err := singleManifestForTest[jsonCollectionConfig]("app")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	env := make(map[string]string)
 	for _, v := range variables {
-		env[v.Name] = v.Default
+		if v.Default.State == DefaultRendered {
+			env[v.Name] = v.Default.Text
+		}
 	}
 
 	cfg, err := Load[jsonCollectionConfig]("app", WithEnv(env))
@@ -262,18 +264,18 @@ func (c *jsonTextDefaults) SetDefaults() {
 }
 
 func TestJSONTextMethodsTakePrecedence(t *testing.T) {
-	variables, err := Manifest[jsonTextDefaults]("app")
+	variables, err := singleManifestForTest[jsonTextDefaults]("app")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if variables[0].Default != `["hello"]` || variables[1].Default != `{"key":"value"}` {
+	if variables[0].Default.Text != `["hello"]` || variables[1].Default.Text != `{"key":"value"}` {
 		t.Fatal(variables)
 	}
 
 	env := make(map[string]string)
 	for _, variable := range variables {
-		env[variable.Name] = variable.Default
+		env[variable.Name] = variable.Default.Text
 	}
 
 	loaded, err := Load[jsonTextDefaults]("app", WithEnv(env))
@@ -312,13 +314,11 @@ func (c *jsonReadOnlyDefaults) SetDefaults() {
 
 func TestJSONTextDefaultRequiresMarshaler(t *testing.T) {
 	loaded, err := Load[jsonReadOnlyDefaults]("app", WithEnv(map[string]string{"APP_VALUES": `["input"]`}))
-	if err != nil || len(loaded.Values) != 1 || loaded.Values[0].Value != "input" {
-		t.Fatal(loaded, err)
+	if err != nil || loaded.Values[0].Value != "input" {
+		t.Fatal(err)
 	}
-
-	variables, err := Manifest[jsonReadOnlyDefaults]("app")
-	problems := ConfigErrors(err)
-	if variables != nil || len(problems) != 1 || problems[0].Kind != ErrorDefaultRender || problems[0].VariableName != "APP_VALUES" {
-		t.Fatal(variables, err)
+	r, err := Manifest[jsonReadOnlyDefaults]("app", IncludeDefaults())
+	if err != nil || len(r.Problems) != 1 || r.Problems[0].VariableName != "APP_VALUES" || r.Configs[0].Variables[0].Default.State != DefaultUnrenderable {
+		t.Fatalf("%+v %v", r, err)
 	}
 }

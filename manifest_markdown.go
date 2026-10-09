@@ -16,14 +16,14 @@ import (
 // loading configs. Manifest errors leave writer untouched. Writer errors are
 // returned and may leave partial output. The caller owns file handling.
 func (l *Loader) WriteManifestMarkdown(writer io.Writer) error {
-	configs, err := l.Manifest()
+	configs, err := l.Manifest(IncludeDefaults())
 	if err != nil {
 		return err
 	}
 
 	var output strings.Builder
 	output.WriteString("# Configuration manifest\n")
-	for _, config := range configs {
+	for _, config := range configs.Configs {
 		fmt.Fprintf(&output, "\n## %s\n\nPrefix: %s\n\n", escapeManifestMarkdownText(config.InstanceName), manifestMarkdownCode(config.Prefix))
 		output.WriteString("| ENV | Type | Requirement | Secret | Default | Description |\n")
 		output.WriteString("| --- | --- | --- | --- | --- | --- |\n")
@@ -41,8 +41,8 @@ func (l *Loader) WriteManifestMarkdown(writer io.Writer) error {
 			}
 
 			defaultText := "—"
-			if !variable.Secret && variable.HasDefault {
-				defaultText = escapeManifestMarkdownText(variable.Default)
+			if !variable.Secret && (variable.Default.State == DefaultRendered) {
+				defaultText = escapeManifestMarkdownText(variable.Default.Text)
 			}
 
 			fmt.Fprintf(&output, "| %s | %s | %s | %s | %s | %s |\n",

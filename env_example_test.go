@@ -50,7 +50,7 @@ func TestWriteEnvExample(t *testing.T) {
 		"# API address\n# Use the staging endpoint\n# Required; must not be empty.\nAPP_HOST=https://api.example.test\n\n" +
 		"# APP_COUNT=\n\n# APP_ENABLED=\n\n" +
 		"# Required.\n# Secret; supply your own value.\n# APP_TOKEN=\n\n" +
-		"# APP_LABELS=\n\n# APP_COMMAND=\n\n# APP_MULTILINE=\n\n" +
+		"APP_LABELS=single\n\n# APP_COMMAND=\n\n# APP_MULTILINE=\n\n" +
 		"# Pool size\nAPP_POOL_SIZE=5\n\n"
 	if output.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", &output, want)
@@ -60,7 +60,7 @@ func TestWriteEnvExample(t *testing.T) {
 		t.Fatalf("generation changed handle state: %v", err)
 	}
 
-	variables, err := Manifest[envExampleConfig]("app")
+	variables, err := singleManifestForTest[envExampleConfig]("app")
 	if err != nil || variables[0].Description != "API address\nUse the staging endpoint" || variables[7].Description != "Pool size" {
 		t.Fatalf("descriptions missing: %v, %v", variables, err)
 	}

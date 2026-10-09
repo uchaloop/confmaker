@@ -134,3 +134,70 @@ func TestPanicMarksActiveField(t *testing.T) {
 		t.Fatal(r)
 	}
 }
+
+func TestManifestSchemaRunsNoUserCode(t *testing.T) {
+	l := MakeLoader()
+	l.Register[manifestPanicDefaults]("app")
+	r, err := l.Manifest()
+	if err != nil || len(r.Configs) != 1 || r.Configs[0].Variables[0].Default.State != DefaultNotEvaluated {
+		t.Fatalf("schema: %+v %v", r, err)
+	}
+}
+
+type manifestV2Config struct {
+	Broken   brokenText `env:"BROKEN"`
+	Zero     int        `env:"ZERO"`
+	Password string     `env:"PASSWORD,secret"`
+	Good     string     `env:"GOOD"`
+}
+
+func (c *manifestV2Config) SetDefaults() {
+	c.Broken = 1
+	c.Password = "do-not-disclose"
+	c.Good = "hello"
+}
+func TestManifestDefaultStates(t *testing.T) {
+	r, err := Manifest[manifestV2Config]("app", IncludeDefaults())
+	if err != nil || len(r.Problems) != 1 {
+		t.Fatalf("result: %+v %v", r, err)
+	}
+	v := r.Configs[0].Variables
+	if v[0].Default.State != DefaultUnrenderable || v[1].Default.State != DefaultZero || v[2].Default.State != DefaultRedacted || v[3].Default.Text != "hello" {
+		t.Fatal(v)
+	}
+	if strings.Contains(fmt.Sprint(r), "do-not-disclose") {
+		t.Fatal("leaked secret")
+	}
+}
+
+type emptyRendered int
+
+func (*emptyRendered) UnmarshalText([]byte) error  { return nil }
+func (emptyRendered) MarshalText() ([]byte, error) { return []byte{}, nil }
+
+type emptyRenderedConfig struct {
+	Value emptyRendered `env:"VALUE"`
+}
+
+func (c *emptyRenderedConfig) SetDefaults() { c.Value = 1 }
+func TestManifestRenderedEmptyText(t *testing.T) {
+	r, err := Manifest[emptyRenderedConfig]("app", IncludeDefaults())
+	if err != nil || r.Configs[0].Variables[0].Default.State != DefaultRendered || r.Configs[0].Variables[0].Default.Text != "" {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+func TestManifestPanicDoesNotChangeLoad(t *testing.T) {
+	l := MakeLoader(WithDiagnostics())
+	l.Register[manifestPanicDefaults]("app")
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("panic swallowed")
+			}
+		}()
+		_, _ = l.Manifest(IncludeDefaults())
+	}()
+	if l.Report().State != LoadNotStarted {
+		t.Fatal(l.Report())
+	}
+}

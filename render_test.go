@@ -19,21 +19,19 @@ type brokenTextConfig struct {
 	Value brokenText `env:"VALUE"`
 }
 
+func (c *brokenTextConfig) SetDefaults() { c.Value = 1 }
+
 type displayInt int
 
 func (displayInt) String() string { return "display only" }
 
 func TestLoadDoesNotRenderDefaults(t *testing.T) {
-	t.Parallel()
-
-	_, err := Load[brokenTextConfig]("confxrender", WithEnv(nil))
-	if err != nil {
-		t.Fatalf("load invoked marshaler: %v", err)
+	if _, err := Load[brokenTextConfig]("app", WithEnv(nil)); err != nil {
+		t.Fatal(err)
 	}
-
-	_, err = Manifest[brokenTextConfig]("confxrender")
-	if !errors.Is(err, errMarshalDefault) || !strings.Contains(err.Error(), "CONFXRENDER_VALUE") {
-		t.Fatalf("lost marshal error or field context: %v", err)
+	r, err := Manifest[brokenTextConfig]("app", IncludeDefaults())
+	if err != nil || len(r.Problems) != 1 || r.Problems[0].VariableName != "APP_VALUE" {
+		t.Fatalf("%+v %v", r, err)
 	}
 }
 
@@ -130,9 +128,9 @@ type ambiguousDefaults struct {
 
 func (c *ambiguousDefaults) SetDefaults() { c.Items = []string{"a,b"} }
 func TestManifestRejectsAmbiguousDefaultWithContext(t *testing.T) {
-	_, err := Manifest[ambiguousDefaults]("confxrender")
-	if err == nil || !strings.Contains(err.Error(), "field Items") || !strings.Contains(err.Error(), "CONFXRENDER_ITEMS") {
-		t.Fatalf("missing context: %v", err)
+	r, err := Manifest[ambiguousDefaults]("app", IncludeDefaults())
+	if err != nil || len(r.Problems) != 1 || r.Problems[0].FieldPath != "Items" || r.Problems[0].VariableName != "APP_ITEMS" {
+		t.Fatalf("%+v %v", r, err)
 	}
 }
 
@@ -148,10 +146,11 @@ func TestMarshalOnlyScalarUsesItsParserSyntax(t *testing.T) {
 }
 
 func TestManifestRequiresEncoderForCustomDecoder(t *testing.T) {
-	if _, err := Manifest[struct {
+	r, err := Manifest[struct {
 		Value countedByte `env:"VALUE"`
-	}]("confxrender"); err == nil || !strings.Contains(err.Error(), "TextMarshaler") {
-		t.Fatalf("missing encoder: %v", err)
+	}]("app", IncludeDefaults())
+	if err != nil || len(r.Problems) != 0 || r.Configs[0].Variables[0].Default.State != DefaultZero {
+		t.Fatalf("zero default should not render: %+v %v", r, err)
 	}
 }
 
@@ -168,12 +167,12 @@ func TestDuplicateEncodedMapKeysAreRejected(t *testing.T) {
 }
 
 func TestManifestAggregatesMarshalErrors(t *testing.T) {
-	_, err := Manifest[struct {
-		First  brokenText `env:"FIRST"`
-		Second brokenText `env:"SECOND"`
-	}]("confxrender")
-	if err == nil || !errors.Is(err, errMarshalDefault) || !strings.Contains(err.Error(), "field First") || !strings.Contains(err.Error(), "field Second") {
-		t.Fatalf("marshal errors not aggregated: %v", err)
+	l := MakeLoader()
+	l.Register[brokenTextConfig]("a")
+	l.Register[brokenTextConfig]("b")
+	r, err := l.Manifest(IncludeDefaults())
+	if err != nil || len(r.Problems) != 2 || r.Problems[0].InstanceName != "a" || r.Problems[1].InstanceName != "b" {
+		t.Fatalf("%+v %v", r, err)
 	}
 }
 
@@ -200,14 +199,18 @@ func TestDefaultsRenderForCollections(t *testing.T) {
 		t.Fatalf("bind: %v", err)
 	}
 
-	variables, err := describeFields(reflect.ValueOf(&cfg).Elem(), bindings)
-	if err != nil {
-		t.Fatal(err)
+	variables := make([]Variable, len(bindings))
+	for i, b := range bindings {
+		variables[i].Name = b.Name
+	}
+	problems := evaluateDefaults(descriptor{fields: bindings, defaults: func() any { return &cfg }}, variables)
+	if len(problems) != 0 {
+		t.Fatal(problems)
 	}
 
 	rendered := make(map[string]string, len(variables))
 	for _, b := range variables {
-		rendered[b.Name] = b.Default
+		rendered[b.Name] = b.Default.Text
 	}
 
 	want := map[string]string{

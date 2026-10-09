@@ -32,12 +32,12 @@ func TestExplicitNameAndPrefix(t *testing.T) {
 		}
 	}
 
-	variables, err := Manifest[explicitNamedConfig]("confxdefault")
+	variables, err := singleManifestForTest[explicitNamedConfig]("confxdefault")
 	if err != nil || variables[0].Name != "CONFXDEFAULT_HOST" {
 		t.Fatalf("manifest: %v, %v", variables, err)
 	}
 
-	variables, err = Manifest[explicitNamedConfig]("confxcustom")
+	variables, err = singleManifestForTest[explicitNamedConfig]("confxcustom")
 	if err != nil || variables[0].Name != "CONFXCUSTOM_HOST" {
 		t.Fatalf("manifest: %v, %v", variables, err)
 	}
@@ -115,7 +115,7 @@ func TestRegistrationErrorPrecedence(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, manifestErr := Manifest[int](tc.instanceName, tc.opts...)
+			_, manifestErr := singleManifestForTest[int](tc.instanceName, tc.opts...)
 			loader := MakeLoader(WithEnv(nil))
 			loader.Register[int](tc.instanceName, tc.opts...)
 			loaderErr := loader.Load()
@@ -128,6 +128,12 @@ func TestRegistrationErrorPrecedence(t *testing.T) {
 			_, loadErr := Load[int](tc.instanceName, loadOpts...)
 
 			for entry, err := range map[string]error{"Manifest": manifestErr, "Loader": loaderErr} {
+				if entry == "Manifest" && tc.name == "nil option" {
+					if err == nil || len(ConfigErrors(err)) == 0 {
+						t.Fatal(err)
+					}
+					continue
+				}
 				if err == nil || err.Error() != tc.want {
 					t.Errorf("%s: got %v, want %q", entry, err, tc.want)
 				}

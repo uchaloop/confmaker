@@ -50,7 +50,7 @@ func TestSecretPublishesNoDefault(t *testing.T) {
 	variable := manifested[struct {
 		Password secret.Secret `env:"PASSWORD"`
 	}](t, "confxapp")[0]
-	if len(variable.Default) != 0 || variable.HasDefault {
+	if len(variable.Default.Text) != 0 || (variable.Default.State == DefaultRendered) {
 		t.Fatalf("a secret published a default: %+v", variable)
 	}
 
@@ -64,7 +64,7 @@ func TestManifestReportsAnInvalidDeclaration(t *testing.T) {
 		MaxConns int `env:"MAX_CONNS"`
 	}
 
-	variables, err := Manifest[struct {
+	variables, err := singleManifestForTest[struct {
 		Shards []pool
 	}]("confxapp")
 	if err == nil {
@@ -83,7 +83,7 @@ func TestInstanceNameIsChecked(t *testing.T) {
 
 	for _, name := range rejected {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Manifest[strictConfig](name); err == nil {
+			if _, err := singleManifestForTest[strictConfig](name); err == nil {
 				t.Errorf("Manifest accepted %q", name)
 			}
 

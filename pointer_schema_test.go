@@ -22,7 +22,7 @@ type nestedRequiredConfig struct {
 func checkPointerDeclaration[T any](t *testing.T) {
 	t.Helper()
 
-	variables, err := Manifest[T]("app")
+	variables, err := singleManifestForTest[T]("app")
 	problems := ConfigErrors(err)
 	if variables != nil || len(problems) == 0 || problems[0].Kind != ErrorDeclaration || problems[0].InstanceName != "app" {
 		t.Fatalf("expected declaration error, got %v, %v", variables, err)
