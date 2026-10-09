@@ -1,4 +1,21 @@
-// Package confmaker centralizes explicit, typed ENV configuration.
+// Package confmaker centralizes explicit, typed configuration.
+//
+// The default engine loads ENV. WithEngine selects a custom Engine or EngineFunc,
+// which receives a LoadRequest with a registration name and a non-nil struct pointer.
+// Custom engines own their tags, source consistency and error sanitization. They
+// must not retain or modify the target after returning. Sharing an engine between
+// loaders requires safe concurrent use; its resources remain caller-owned.
+// WithEnv, AllowUnknown and WithPrefix cannot be used with a custom engine.
+// Custom registration names may be any nonempty unique strings.
+//
+// LoadContext supports cooperative cancellation. The initiating context controls
+// the load; other callers cancel only their waiting. Cancellation after starting
+// is final, while an already published result takes precedence. Load uses Background.
+// LoaderOption is the common loader option type.
+//
+// Custom engines have config-level reports (DetailConfig) and do not support
+// Manifest (ErrManifestUnsupported). The built-in engine has DetailField reports.
+// The ENV-specific guarantees below apply to the built-in engine.
 //
 // Register configs on a Loader, call Load once, then read their Handle values.
 // Load[T] handles a single config. Only the root SetDefaults and Validate methods

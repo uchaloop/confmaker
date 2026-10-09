@@ -12,7 +12,7 @@ type LoadOption interface {
 	loadOption()
 }
 
-// ConfigOption configures one config with [WithPrefix]. [Loader.Register],
+// ConfigOption configures one built-in-engine config with [WithPrefix]. [Loader.Register],
 // [Manifest] and [Load] take it.
 type ConfigOption interface {
 	DescribeOption
@@ -20,7 +20,7 @@ type ConfigOption interface {
 	applyConfig(*configSettings)
 }
 
-// LoaderOption configures a whole load: [WithEnv], [AllowUnknown],
+// LoaderOption configures a whole load: [WithEngine], [WithEnv], [AllowUnknown],
 // [WithDiagnostics] and [WithDiagnosticHandler].
 // [MakeLoader] and [Load] take it.
 type LoaderOption interface {

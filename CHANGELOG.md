@@ -9,6 +9,17 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- **Breaking:** rename `EnvOption` to `LoaderOption`. ENV-specific options require
+  the built-in engine and cannot be mixed with a custom engine.
+- Add `Engine`, `EngineFunc` and `WithEngine` for application-owned backends without
+  adding external parser dependencies. Preserve the built-in ENV behavior by default.
+- Add cooperative `LoadContext` methods and generic helpers; cancellation of a
+  waiter does not cancel the load, and cancellation of a started load is final.
+- Add report `DetailLevel`: custom engines provide configuration outcomes;
+  detailed field reports remain built-in. Custom-engine Manifest calls return
+  `ErrManifestUnsupported` without running user code.
+
+
 - **Breaking:** move the module to `github.com/uchaloop/confmaker/v2`.
 - **Breaking:** replace separate diagnostic receivers with `Loader.Report()` and
   parameterless `WithDiagnostics()`. Reports distinguish disabled, pending,

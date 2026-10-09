@@ -1,11 +1,85 @@
 # confmaker
 
-Explicit, centralized ENV configuration for Go applications. Packages declare typed
+Explicit, centralized configuration for Go applications with a built-in ENV engine. Packages declare typed
 configuration; the application registers instances, loads the whole set once and
 passes checked values to consumers. Go 1.27.0 or later is required.
 
 This README describes the v2 API on the current branch. For an installed release,
 use its tagged documentation.
+
+## Custom engines
+
+Without options, confmaker uses its built-in ENV engine and the rules below.
+`WithEngine(engine)` selects a backend for every registration. It implements:
+
+```go
+type Engine interface {
+    Load(context.Context, LoadRequest) error
+}
+type LoadRequest struct {
+    Name string
+    Target any
+}
+```
+
+`Target` is a non-nil pointer to a fresh configuration struct. Root `SetDefaults`
+runs before the backend and root `Validate` after successful filling. The backend
+owns tags, supported field types, sources and overwrite rules; its defaults may
+replace the initial values. It must not retain Target or modify it after returning.
+Names may be any nonempty unique strings with a custom engine. The built-in engine
+retains the stricter name rules below.
+
+`EngineFunc` wraps a function. This complete application example uses env/v11;
+install that dependency in the application, not in confmaker:
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "maps"
+
+    env "github.com/caarlos0/env/v11"
+    "github.com/uchaloop/confmaker/v2"
+)
+
+func main() {
+    // Snapshot at construction; map registration names to prefixes explicitly.
+    snapshot := map[string]string{"APP_PORT": "8080"}
+    prefixes := map[string]string{"server": "APP_"}
+    engine := confmaker.EngineFunc(func(ctx context.Context, req confmaker.LoadRequest) error {
+        if err := ctx.Err(); err != nil { return err }
+        prefix, ok := prefixes[req.Name]
+        if !ok { return fmt.Errorf("unknown registration %q", req.Name) }
+        return env.ParseWithOptions(req.Target, env.Options{
+            Environment: maps.Clone(snapshot), Prefix: prefix,
+        })
+    })
+    type Config struct { Port int `env:"PORT,required"` }
+    cfg, err := confmaker.Load[Config]("server", confmaker.WithEngine(engine))
+    if err != nil { log.Fatal(err) }
+    fmt.Println(cfg.Port)
+}
+```
+
+This example adopts env/v11 semantics; it does not interrupt a running parser or
+sanitize its errors. Errors from any backend may contain sensitive input. Report
+never includes error text, but returning or logging the original error is the
+backend/application's responsibility. No external engine dependency is included
+in confmaker.
+
+The engine receives sequential calls within one Loader. Sharing it across loaders
+requires safe concurrent use. The caller owns resources; Loader does not close
+them. A consistent source snapshot is the backend's responsibility. The built-in
+engine still takes one ENV snapshot per load.
+
+`LoaderOption` configures a loader; it replaces `EnvOption` in this development
+version. `WithEngine`, `WithDiagnostics` and `WithDiagnosticHandler` are general
+options. `WithEnv`, `AllowUnknown` and registration-level `WithPrefix` require the
+built-in engine: mixing them with a custom engine is an error, regardless of order.
+Nil (including typed nil) or repeated `WithEngine` is an error.
 
 ## Loading
 
@@ -50,7 +124,7 @@ Set `POSTGRES_HOST` before running the example. For one config use
 `WithEnv(map[string]string{...})` replaces the entire process ENV and copies the
 map. A nil map means empty ENV. No files or external stores are read.
 
-Instance names contain lowercase letters, digits, `_`, `-`, `.` and start/end
+With the built-in engine, instance names contain lowercase letters, digits, `_`, `-`, `.` and start/end
 with a letter or digit. `read-replica` produces `READ_REPLICA_`.
 `WithPrefix("READ_DB_")` overrides the prefix, not identity. Names, prefixes and
 full variable names must not collide. Prefix overrides contain uppercase letters,
@@ -67,7 +141,15 @@ Returned structs share nested maps, slices and pointers: treat them as read-only
 Loader is safe for concurrent use. User defaults, parsers and validators must not
 recursively call the same loader's Load.
 
-## Field rules
+`LoadContext(ctx)` adds cooperative cancellation; `Load()` uses Background.
+The initiating context controls the one-shot load. Cancellation after starting
+is final, while cancellation before starting leaves the Loader usable. A waiting
+call can cancel its own wait without cancelling the owner. An already published
+result takes precedence over cancellation. User methods run synchronously and
+cannot be forcibly interrupted. `LoadContext[T](ctx, name, opts...)` is the
+single-configuration equivalent. Contexts must not be nil.
+
+## Built-in field rules
 
 | Declaration | Meaning |
 | --- | --- |
@@ -121,6 +203,11 @@ err := loader.Load()
 report := loader.Report() // Also available on error.
 ```
 
+Final reports have `DetailLevel`: `DetailConfig` (`config`) for custom engines,
+with registration names, types and outcomes; `DetailField` (`field`) for the
+built-in engine, with variable details. Unavailable field details and ENV prefixes
+are not inferred. Reports without details have an empty DetailLevel.
+
 Report is an independent, value-free snapshot. It includes no defaults, error
 messages, causes or panic values. States are disabled, not_started, in_progress,
 succeeded, failed and panicked. Disabled/not_started/in_progress have no details.
@@ -137,6 +224,12 @@ propagates to the executing caller and makes later Load return ErrLoadPanicked.
 Handler panic propagates but does not change the published load result.
 
 ## Manifest and exports
+
+Manifest is currently available only for the built-in engine. With a custom
+engine, `Loader.Manifest` returns `ErrManifestUnsupported` and a zero result,
+without calling user methods. `Manifest[T]` always describes the built-in schema.
+Exporters still accept any prepared `ManifestResult`.
+
 
 ```go
 // Omit IncludeDefaults for schema only, without user methods or ENV reads.
