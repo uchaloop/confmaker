@@ -134,7 +134,7 @@ available after a successful upload for `main`.
 
 Keep each pull request focused. Explain the problem, resulting behavior and
 validation performed. Update examples and documentation when behavior changes,
-and add a concise entry under `Unreleased` in [CHANGELOG.md](CHANGELOG.md).
+and add a concise entry under the current unreleased version in [CHANGELOG.md](CHANGELOG.md).
 
 From v1 onward, compatibility includes more than Go signatures: ENV names and
 tags, parsing and default semantics, error categories, and the exported manifest
@@ -144,3 +144,45 @@ unchanged function signature does not make a behavior change compatible.
 Never include real credentials in code, examples, fixtures or issue reports.
 Preserve secret handling and the absence of values from diagnostic reports.
 Manifest exports may contain non-secret defaults, so those must be safe to share.
+
+## Changelog style
+
+Use the same format in confmaker, confx and secret:
+
+- Keep newest versions first. Use `## [x.y.z] - Unreleased` once the target version
+  is known, or `## [Unreleased]` before choosing it. Do not add a separate target
+  release paragraph. Version headings omit `v`; Git tags include it.
+- At publication, replace `Unreleased` with the actual release date in
+  `YYYY-MM-DD` format. Do not infer publication dates from commit dates. Preserve
+  undated historical entries when the release date cannot be verified.
+- Group entries under `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
+  `Security`, in that order. Omit empty categories, even for small releases.
+- Write in English, using past-tense opening verbs such as `Added`, `Changed`,
+  `Removed` and `Fixed`. Each bullet describes one user-visible change, normally
+  in one or two sentences. Include internal work only when it explains a useful
+  result. Preserve necessary historical compatibility and retraction notes.
+- Prefix incompatible changes with `**Breaking:**` in their normal category and
+  explain the replacement or required action when applicable. Do not duplicate
+  them in a separate breaking-changes section.
+- Define heading links at the bottom of the file. An unreleased target compares
+  the last released tag with `HEAD`; a released version compares its predecessor
+  with its tag. Link the first release to its release page. Preserve explicit
+  historical exceptions for retracted or incorrectly tagged versions.
+- Separate headings, paragraphs and lists with one blank line. Wrap continuation
+  lines consistently and format API names as inline code.
+
+Example before publication:
+
+```markdown
+## [2.0.0] - Unreleased
+
+### Added
+
+- Added support for application-provided configuration engines.
+
+### Changed
+
+- **Breaking:** Renamed `EnvOption` to `LoaderOption`; update option declarations.
+
+[2.0.0]: https://github.com/uchaloop/confmaker/compare/v1.0.1...HEAD
+```
