@@ -4,8 +4,8 @@ Explicit, centralized ENV configuration for Go applications. Packages declare ty
 configuration; the application registers instances, loads the whole set once and
 passes checked values to consumers. Go 1.27.0 or later is required.
 
-This branch prepares **v2**. It is not a published release. See
-[Migration to v2](docs/migration-v2.md) for incompatible changes and release order.
+This README describes the v2 API on the current branch. For an installed release,
+use its tagged documentation.
 
 ## Loading
 
@@ -171,6 +171,8 @@ application's responsibility and must not contain secrets.
 [confx](https://github.com/uchaloop/confx) owns Fx wiring, not parsing or validation.
 Use its matching v2-compatible development version; earlier releases use v1 types.
 
-Run `go test -race ./...` and `go vet ./...`. Integration with the unpublished
-marker and v2 adapter is verified through a local Go workspace; publication must
-follow the migration guide. Production dependency checks use `go list -deps .`.
+Run `go build ./...`, `go test -race ./...` and `go vet ./...`. A local Go
+workspace can connect confmaker, confx and secret during development. Do not commit
+workspace files or local module replacements. Before releasing, verify each module
+with `GOWORK=off` against published dependencies. Production dependency checks use
+`go list -deps .`.

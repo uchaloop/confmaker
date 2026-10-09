@@ -20,9 +20,9 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# go.work is committed on purpose: confmaker and confx are developed together.
-# CI also checks each module with GOWORK=off, so the workspace cannot hide a
-# wrong go.mod.
+# Go workspace files are local to each developer.
+go.work
+go.work.sum
 
 # env file
 .env
@@ -31,3 +31,5 @@ profile.cov
 .idea/
 .vscode/
 .DS_Store
+
+.superpowers/
