@@ -51,9 +51,9 @@ func TestPointerSchemaRestrictions(t *testing.T) {
 
 func TestScalarPointersStillLoad(t *testing.T) {
 	cfg, err := Load[struct {
-		Timeout **time.Duration `env:"TIMEOUT"`
+		Timeout *time.Duration `env:"TIMEOUT"`
 	}]("app", WithEnv(map[string]string{"APP_TIMEOUT": "3s"}))
-	if err != nil || cfg.Timeout == nil || *cfg.Timeout == nil || **cfg.Timeout != 3*time.Second {
+	if err != nil || cfg.Timeout == nil || *cfg.Timeout != 3*time.Second {
 		t.Fatalf("scalar pointers: %+v, %v", cfg, err)
 	}
 }

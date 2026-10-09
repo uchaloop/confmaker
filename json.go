@@ -103,10 +103,6 @@ func jsonParser(t reflect.Type) (parser, error) {
 		return nil, err
 	}
 
-	if err := checkJSONSecrets(t, make(map[reflect.Type]bool)); err != nil {
-		return nil, err
-	}
-
 	if err := checkJSONType(t, make(map[reflect.Type]bool)); err != nil {
 		return nil, err
 	}
@@ -235,36 +231,6 @@ func renderJSON(value reflect.Value) (string, error) {
 
 // Inspect the complete type graph, including ignored and private fields: custom
 // marshalers may expose those. A visited set permits recursive config types.
-func checkJSONSecrets(t reflect.Type, seen map[reflect.Type]bool) error {
-	if seen[t] {
-		return nil
-	}
-
-	seen[t] = true
-	if t.Implements(secretValueType) || reflect.PointerTo(t).Implements(secretValueType) {
-		return fmt.Errorf("JSON contains secret type %s; give each secret its own variable", t)
-	}
-
-	switch t.Kind() {
-	case reflect.Pointer, reflect.Slice, reflect.Array:
-		return checkJSONSecrets(t.Elem(), seen)
-	case reflect.Map:
-		if err := checkJSONSecrets(t.Key(), seen); err != nil {
-			return err
-		}
-
-		return checkJSONSecrets(t.Elem(), seen)
-	case reflect.Struct:
-		for field := range t.Fields() {
-			if err := checkJSONSecrets(field.Type, seen); err != nil {
-				return fmt.Errorf("%s: %w", field.Name, err)
-			}
-		}
-	}
-
-	return nil
-}
-
 // decodesJSONText identifies collection elements with a scalar text form.
 func decodesJSONText(t reflect.Type) bool {
 	return reflect.PointerTo(t).Implements(textUnmarshalerType)

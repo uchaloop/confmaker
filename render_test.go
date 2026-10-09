@@ -1,7 +1,6 @@
 package confmaker
 
 import (
-	"bytes"
 	"errors"
 	"reflect"
 	"strings"
@@ -256,45 +255,10 @@ func (c *nestedNilDefaultConfig) SetDefaults() {
 	c.Values = map[string]**string{"key": &inner}
 }
 
-func TestNestedNilDefaultsLoadButCannotBeDescribed(t *testing.T) {
-	cfg, err := Load[nestedNilDefaultConfig]("app", WithEnv(nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(cfg.Items) != 2 || cfg.Items[0] == nil || *cfg.Items[0] != nil || cfg.Values["key"] == nil || *cfg.Values["key"] != nil {
-		t.Fatal("loading changed nested nil defaults")
-	}
-
-	variables, err := Manifest[nestedNilDefaultConfig]("app")
-	problems := ConfigErrors(err)
-	if variables != nil || len(problems) != 2 {
-		t.Fatalf("manifest: %v, %v", variables, err)
-	}
-
-	for _, problem := range problems {
-		if problem.Kind != ErrorDefaultRender || problem.InstanceName != "app" {
-			t.Fatalf("context: %#v", problem)
-		}
-	}
-
-	loader := MakeLoader(WithEnv(nil))
-	loader.Register[nestedNilDefaultConfig]("app")
-	for name, write := range map[string]func(*bytes.Buffer) error{
-		"env":      func(b *bytes.Buffer) error { return loader.WriteEnvExample(b) },
-		"json":     func(b *bytes.Buffer) error { return loader.WriteManifestJSON(b) },
-		"markdown": func(b *bytes.Buffer) error { return loader.WriteManifestMarkdown(b) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			var output bytes.Buffer
-			if err := write(&output); err == nil || output.Len() != 0 {
-				t.Fatalf("export: %v, %q", err, &output)
-			}
-		})
-	}
-
-	if err := loader.Load(); err != nil {
-		t.Fatalf("export failure affected loading: %v", err)
+func TestNestedPointerDefaultsRejectedBeforeLoad(t *testing.T) {
+	_, err := Load[nestedNilDefaultConfig]("app", WithEnv(nil))
+	if p := ConfigErrors(err); len(p) != 2 || p[0].Kind != ErrorDeclaration || p[1].Kind != ErrorDeclaration {
+		t.Fatalf("expected declaration errors: %v", err)
 	}
 }
 

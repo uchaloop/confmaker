@@ -6,7 +6,7 @@ values to their consumers. Packages do not need to read ENV themselves.
 
 Import the core library:
 
-	import "github.com/uchaloop/confmaker"
+	import "github.com/uchaloop/confmaker/v2"
 
 A [Loader] is the composition point for multiple configurations, including
 multiple instances of the same type:

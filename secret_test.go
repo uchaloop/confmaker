@@ -32,7 +32,7 @@ func TestSecretBehindPointersInCollectionIsRefused(t *testing.T) {
 	}
 
 	for name, err := range cases {
-		if !strings.Contains(err.Error(), "holds a secret in a") {
+		if !strings.Contains(err.Error(), "unsupported pointer shape") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -42,7 +42,7 @@ func TestParseErrorBehindPointersNeverPrintsTheValue(t *testing.T) {
 	t.Parallel()
 
 	_, err := Load[struct {
-		Password **secret.Secret `env:"PASSWORD,notEmpty"`
+		Password *secret.Secret `env:"PASSWORD,notEmpty"`
 	}]("confxapp", WithEnv(map[string]string{"CONFXAPP_PASSWORD": ""}))
 	if err == nil || strings.Contains(err.Error(), "FAKE") {
 		t.Fatalf("got %v", err)

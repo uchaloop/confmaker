@@ -231,7 +231,7 @@ func waitForBlockedLoad(t *testing.T) {
 	for time.Now().Before(deadline) {
 		stacks := string(buf[:runtime.Stack(buf, true)])
 		for goroutine := range strings.SplitSeq(stacks, "\n\n") {
-			if strings.Contains(goroutine, "[chan receive") && strings.Contains(goroutine, "confmaker.(*Loader).Load(") {
+			if strings.Contains(goroutine, "[chan receive") && strings.Contains(goroutine, "confmaker/v2.(*Loader).Load(") {
 				return
 			}
 		}

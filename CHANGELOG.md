@@ -78,7 +78,7 @@ compared with v0.5.0.
 ### Changed
 
 - **Breaking:** the Fx adapter `confx` moved out of this module into its own,
-  `github.com/uchaloop/confmaker/confx`, in the same repository and under the same
+  `github.com/uchaloop/confmaker/v2/confx`, in the same repository and under the same
   import path. This module no longer depends on Fx; Fx applications add the confx
   module, whose changes are in `confx/CHANGELOG.md`.
 - **Breaking:** loading, options, the manifest and the dump live in package
@@ -381,18 +381,18 @@ its only dependencies.
   `github.com/uchaloop/secret` module, and the error names only the variable,
   never the value.
 
-[Unreleased]: https://github.com/uchaloop/confmaker/compare/v1.0.1...HEAD
-[1.0.1]: https://github.com/uchaloop/confmaker/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/uchaloop/confmaker/compare/v0.9.0...v1.0.0
-[0.9.0]: https://github.com/uchaloop/confmaker/compare/v0.8.0...v0.9.0
-[0.8.0]: https://github.com/uchaloop/confmaker/compare/v0.7.0...v0.8.0
-[0.7.0]: https://github.com/uchaloop/confmaker/compare/v0.6.2...v0.7.0
-[0.6.2]: https://github.com/uchaloop/confmaker/compare/v0.5.0...v0.6.2
-[0.5.0]: https://github.com/uchaloop/confmaker/compare/v0.4.2...v0.5.0
-[0.4.2]: https://github.com/uchaloop/confmaker/compare/v0.4.1...v0.4.2
-[0.4.1]: https://github.com/uchaloop/confmaker/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/uchaloop/confmaker/compare/v0.3.1...v0.4.0
-[0.3.1]: https://github.com/uchaloop/confmaker/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/uchaloop/confmaker/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.2.0
-[0.1.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.1.0
+[Unreleased]: https://github.com/uchaloop/confmaker/v2/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/uchaloop/confmaker/v2/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/uchaloop/confmaker/v2/compare/v0.9.0...v1.0.0
+[0.9.0]: https://github.com/uchaloop/confmaker/v2/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/uchaloop/confmaker/v2/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/uchaloop/confmaker/v2/compare/v0.6.2...v0.7.0
+[0.6.2]: https://github.com/uchaloop/confmaker/v2/compare/v0.5.0...v0.6.2
+[0.5.0]: https://github.com/uchaloop/confmaker/v2/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/uchaloop/confmaker/v2/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/uchaloop/confmaker/v2/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/uchaloop/confmaker/v2/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/uchaloop/confmaker/v2/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/uchaloop/confmaker/v2/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/uchaloop/confmaker/v2/releases/tag/v0.2.0
+[0.1.0]: https://github.com/uchaloop/confmaker/v2/releases/tag/v0.1.0

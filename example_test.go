@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/uchaloop/confmaker"
+	"github.com/uchaloop/confmaker/v2"
 )
 
 // StoreConfig is the kind of config a library declares: plain fields, env tags,

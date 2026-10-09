@@ -2,7 +2,7 @@
 
 <p align="center"><img src="logo.png" alt="confmaker" width="240"></p>
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/uchaloop/confmaker.svg)](https://pkg.go.dev/github.com/uchaloop/confmaker) [![CI](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/uchaloop/confmaker/branch/main/graph/badge.svg)](https://app.codecov.io/gh/uchaloop/confmaker) [![Release](https://img.shields.io/github/v/tag/uchaloop/confmaker?label=release)](https://github.com/uchaloop/confmaker/tags) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/uchaloop/confmaker/v2.svg)](https://pkg.go.dev/github.com/uchaloop/confmaker/v2) [![CI](https://github.com/uchaloop/confmaker/v2/actions/workflows/ci.yml/badge.svg)](https://github.com/uchaloop/confmaker/v2/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/uchaloop/confmaker/branch/main/graph/badge.svg)](https://app.codecov.io/gh/uchaloop/confmaker) [![Release](https://img.shields.io/github/v/tag/uchaloop/confmaker?label=release)](https://github.com/uchaloop/confmaker/v2/tags) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Explicit, centralized configuration for Go applications.** Packages declare
 what they need; the application registers their configs, loads ENV once and
@@ -24,11 +24,11 @@ Requires **Go 1.27.0 or later**. The command below installs the latest stable re
 This README describes the current branch; for a pinned release, use its tagged documentation.
 
 ```sh
-go get github.com/uchaloop/confmaker@latest
+go get github.com/uchaloop/confmaker/v2@latest
 ```
 
 ```go
-import "github.com/uchaloop/confmaker"
+import "github.com/uchaloop/confmaker/v2"
 ```
 
 The library reads ENV. It does not automatically load `.env` files, contact
@@ -49,7 +49,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/uchaloop/confmaker"
+	"github.com/uchaloop/confmaker/v2"
 )
 
 type StoreConfig struct {
@@ -500,7 +500,7 @@ by JSON itself; camelCase is this exporter's contract.
 
 ## Reference
 
-- [GoDoc](https://pkg.go.dev/github.com/uchaloop/confmaker): complete API and type rules.
+- [GoDoc](https://pkg.go.dev/github.com/uchaloop/confmaker/v2): complete API and type rules.
 - [confx](https://github.com/uchaloop/confx): the Uber Fx adapter.
 - [Changelog](CHANGELOG.md): changes and migration notes.
 - [Contributing](CONTRIBUTING.md): project scope, development checks and contribution guidelines.

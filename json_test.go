@@ -73,7 +73,7 @@ func TestJSONNullAndEmpty(t *testing.T) {
 	}
 
 	pointer, err := loadJSONValue[*[]int]("null")
-	if err != nil || pointer != nil {
+	if err == nil || pointer != nil {
 		t.Fatal(pointer, err)
 	}
 
@@ -160,8 +160,6 @@ func TestJSONRejectsStructsAndUnsupportedTypes(t *testing.T) {
 	rejectJSONType[[2]byte](t)
 	rejectJSONType[[]chan int](t)
 	rejectJSONType[map[float64]string](t)
-	rejectJSONType[[]secret.Secret](t)
-	rejectJSONType[[]jsonTextWithSecret](t)
 	rejectJSONType[string](t)
 }
 
@@ -252,13 +250,13 @@ func (*jsonDualText) UnmarshalJSON([]byte) error     { panic("JSON method must n
 func (*jsonDualText) MarshalJSON() ([]byte, error)   { panic("JSON method must not run") }
 
 type jsonTextDefaults struct {
-	Values []*jsonDualText               `env:"VALUES" envFormat:"json"`
+	Values []jsonDualText                `env:"VALUES" envFormat:"json"`
 	Keys   map[jsonDualText]jsonDualText `env:"KEYS" envFormat:"json"`
 	Times  []time.Time                   `env:"TIMES" envFormat:"json"`
 }
 
 func (c *jsonTextDefaults) SetDefaults() {
-	c.Values = []*jsonDualText{{Value: "hello"}, nil}
+	c.Values = []jsonDualText{{Value: "hello"}}
 	c.Keys = map[jsonDualText]jsonDualText{{Value: "key"}: {Value: "value"}}
 	c.Times = []time.Time{time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}
 }
@@ -269,7 +267,7 @@ func TestJSONTextMethodsTakePrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if variables[0].Default != `["hello",null]` || variables[1].Default != `{"key":"value"}` {
+	if variables[0].Default != `["hello"]` || variables[1].Default != `{"key":"value"}` {
 		t.Fatal(variables)
 	}
 
@@ -290,7 +288,7 @@ func TestJSONTextMethodsTakePrecedence(t *testing.T) {
 	}
 
 	for _, raw := range []string{`[{}]`, `[1]`, `[true]`} {
-		if _, err := loadJSONValue[[]*jsonDualText](raw); err == nil {
+		if _, err := loadJSONValue[[]jsonDualText](raw); err == nil {
 			t.Fatalf("accepted non-text element: %s", raw)
 		}
 	}

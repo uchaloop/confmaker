@@ -187,13 +187,6 @@ func compileField(
 		return fieldSpec{}, fmt.Errorf("field %s: %w", fieldPath, err)
 	}
 
-	if holdsSecretInCollection(field.Type) {
-		return fieldSpec{}, fmt.Errorf(
-			"field %s holds a secret in a %s; give each secret its own variable",
-			fieldPath, field.Type.Kind(),
-		)
-	}
-
 	// The environment cannot carry a name with = or NUL: such a variable could
 	// be passed through WithEnv but never set in a process.
 	fullName := prefix + name
@@ -201,7 +194,7 @@ func compileField(
 		return fieldSpec{}, fmt.Errorf("field %s reads %q, which no environment variable can be named", fieldPath, fullName)
 	}
 
-	secret := isSecretType(field.Type)
+	secret := opts.secret || isSecretType(field.Type)
 	codec, err := makeFieldCodec(field)
 	if err != nil {
 		return fieldSpec{}, fmt.Errorf("field %s: %w", fieldPath, err)
@@ -384,38 +377,39 @@ func typeDeclaresVariables(t reflect.Type, seen map[reflect.Type]bool) bool {
 // checkPointerChains rejects pointer-only cycles, while allowing recursive
 // structs and collections whose pointers eventually reach a concrete shape.
 func checkPointerChains(t reflect.Type, seen map[reflect.Type]bool) error {
+	return checkENVShape(t, false, seen)
+}
+func checkENVShape(t reflect.Type, inCollection bool, seen map[reflect.Type]bool) error {
+	if t.Kind() == reflect.Pointer {
+		if inCollection || t.Elem().Kind() == reflect.Pointer {
+			return fmt.Errorf("unsupported pointer shape %s", t)
+		}
+		elem := t.Elem()
+		if declaresTextForm(elem) {
+			return nil
+		}
+		switch elem.Kind() {
+		case reflect.Slice, reflect.Map, reflect.Array, reflect.Struct, reflect.Interface:
+			return fmt.Errorf("pointer %s must refer to a scalar or text type", t)
+		}
+		return nil
+	}
 	if seen[t] {
 		return nil
 	}
-
 	seen[t] = true
-
-	chain := make(map[reflect.Type]bool)
-	for t.Kind() == reflect.Pointer {
-		if chain[t] {
-			return fmt.Errorf("cyclic pointer chain at %s cannot represent an ENV value", t)
-		}
-
-		chain[t] = true
-		t = t.Elem()
+	if declaresTextForm(t) {
+		return nil
 	}
-
 	switch t.Kind() {
 	case reflect.Slice, reflect.Array:
-		return checkPointerChains(t.Elem(), seen)
+		return checkENVShape(t.Elem(), true, seen)
 	case reflect.Map:
-		if err := checkPointerChains(t.Key(), seen); err != nil {
+		if err := checkENVShape(t.Key(), true, seen); err != nil {
 			return err
 		}
-		return checkPointerChains(t.Elem(), seen)
-	case reflect.Struct:
-		for field := range t.Fields() {
-			if err := checkPointerChains(field.Type, seen); err != nil {
-				return err
-			}
-		}
+		return checkENVShape(t.Elem(), true, seen)
 	}
-
 	return nil
 }
 
@@ -423,6 +417,7 @@ func checkPointerChains(t reflect.Type, seen map[reflect.Type]bool) error {
 type envTagOptions struct {
 	required bool
 	notEmpty bool
+	secret   bool
 }
 
 // parseEnvTagOptions reads that suffix. An option the tag does not define is an
@@ -441,6 +436,8 @@ func parseEnvTagOptions(suffix string) (envTagOptions, error) {
 
 		switch current {
 		case "":
+		case "secret":
+			parsed.secret = true
 		case "required":
 			parsed.required = true
 		case "notEmpty":

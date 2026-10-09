@@ -270,50 +270,21 @@ func TestAnEmptyEnvTagIsNotConfiguration(t *testing.T) {
 	}
 }
 
-// TestASecretInACollectionIsRefused covers the shape that would read a list of
-// secrets out of one variable. It splits on a separator a token cannot escape,
-// and neither the value nor the reason it would not parse is ever printed - so
-// a token holding a comma would become two unusable secrets in silence.
-func TestASecretInACollectionIsRefused(t *testing.T) {
-	t.Run("slice", func(t *testing.T) {
-		type config struct {
-			Tokens []secret.Secret `env:"TOKENS"`
+func TestSecretCollectionsAreSensitive(t *testing.T) {
+	type config struct {
+		Tokens []secret.Secret          `env:"TOKENS"`
+		Values map[string]secret.Secret `env:"VALUES"`
+	}
+	vars := manifested[config](t, "app")
+	for _, v := range vars {
+		if !v.Secret {
+			t.Fatal("collection not sensitive")
 		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "holds a secret in a slice") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("map value", func(t *testing.T) {
-		type config struct {
-			Tokens map[string]secret.Secret `env:"TOKENS"`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "holds a secret in a map") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("slice of pointers", func(t *testing.T) {
-		type config struct {
-			Tokens []*secret.Secret `env:"TOKENS"`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "holds a secret") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("a single secret is still read", func(t *testing.T) {
-		type config struct {
-			Token secret.Secret `env:"TOKEN"`
-		}
-
-		if got := names(manifested[config](t, "confxapp")); len(got) != 1 {
-			t.Fatalf("manifest = %v", got)
-		}
-	})
+	}
+	cfg, err := Load[config]("app", WithEnv(map[string]string{"APP_TOKENS": "one,two", "APP_VALUES": "key:three"}))
+	if err != nil || len(cfg.Tokens) != 2 || cfg.Values["key"].Reveal() != "three" {
+		t.Fatalf("collection load: %v", err)
+	}
 }
 
 // TestAnEnvPrefixThatExtendsNothingIsRefused covers the two shapes where the tag
@@ -431,7 +402,7 @@ func TestSeparatorTagsApplyOnlyWhereValuesAreSplit(t *testing.T) {
 		}](t), "envSeparator applies to a slice or map"},
 		"separator on a pointer to a slice": {bindError[struct {
 			Names *[]string `env:"NAMES" envSeparator:";"`
-		}](t), "envSeparator applies to a slice or map"},
+		}](t), "must refer to a scalar"},
 		"separator without a variable": {bindError[struct {
 			Names []string `envSeparator:";"`
 		}](t), "declares a separator but names no variable"},

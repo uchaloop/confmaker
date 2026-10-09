@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
-
-	"github.com/uchaloop/secret/v2"
 )
 
 // secretValueType is the marker interface a secret type implements.
-var secretValueType = reflect.TypeFor[secret.Value]()
+var secretValueType = reflect.TypeFor[SensitiveValue]()
 
 // Variable describes one environment variable a config reads. The set of them
 // comes from the same compiled schema used to load it, so a variable listed
@@ -200,12 +198,3 @@ func setDefaults[T any](cfg *T) {
 // configuration read from the environment only, nothing but the environment can
 // populate such a field, so the type is consulted purely so a value is reported
 // as set or unset instead of being printed.
-func isSecretType(t reflect.Type) bool {
-	// The parser follows any number of pointers, so the check does too:
-	// ***secret.Secret is as much a secret as secret.Secret.
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-
-	return t.Implements(secretValueType) || reflect.PointerTo(t).Implements(secretValueType)
-}

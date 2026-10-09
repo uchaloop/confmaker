@@ -8,14 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/uchaloop/confmaker"
+	"github.com/uchaloop/confmaker/v2"
 	"github.com/uchaloop/secret/v2"
 )
 
 type secretConfig struct {
-	Password secret.Secret   `env:"PASSWORD"`
-	Empty    secret.Secret   `env:"EMPTY"`
-	Pointer  **secret.Secret `env:"POINTER"`
+	Password secret.Secret  `env:"PASSWORD"`
+	Empty    secret.Secret  `env:"EMPTY"`
+	Pointer  *secret.Secret `env:"POINTER"`
 }
 
 func (c *secretConfig) SetDefaults() {
@@ -58,7 +58,7 @@ func TestSecretLoadingAndDescription(t *testing.T) {
 			expected, source = "private-env", confmaker.SourceEnv
 		}
 
-		if cfg.Password.Reveal() != expected || !cfg.Empty.IsZero() || (**cfg.Pointer).Reveal() != "private-pointer" {
+		if cfg.Password.Reveal() != expected || !cfg.Empty.IsZero() || cfg.Pointer.Reveal() != "private-pointer" {
 			t.Fatal("incorrect secret loading")
 		}
 
