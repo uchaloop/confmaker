@@ -120,7 +120,7 @@ func cloneLoadReport(report LoadReport) LoadReport {
 
 // WithDiagnostics enables collection of value-free reports on the loader.
 // Repeated use is harmless.
-func WithDiagnostics() EnvOption {
+func WithDiagnostics() LoaderOption {
 	return envOption(func(s *envSettings) { s.diagnostics = true })
 }
 
@@ -131,7 +131,7 @@ func WithDiagnostics() EnvOption {
 // the completed load result. A nil or repeated handler is a declaration error.
 // Concurrent Load callers may return before the handler finishes.
 // No logging, process termination or error recovery is performed by this option.
-func WithDiagnosticHandler(handler func(LoadReport)) EnvOption {
+func WithDiagnosticHandler(handler func(LoadReport)) LoaderOption {
 	return envOption(func(s *envSettings) {
 		if handler == nil || s.diagnosticHandler != nil {
 			s.diagnosticErr = makeConfigError(ErrorDeclaration, "", "", errors.New("WithDiagnosticHandler requires one non-nil handler"))

@@ -7,7 +7,7 @@ import (
 )
 
 // LoadOption is an option [Load] takes: every [ConfigOption] and every
-// [EnvOption].
+// [LoaderOption].
 type LoadOption interface {
 	loadOption()
 }
@@ -20,10 +20,10 @@ type ConfigOption interface {
 	applyConfig(*configSettings)
 }
 
-// EnvOption configures a whole load: [WithEnv], [AllowUnknown],
+// LoaderOption configures a whole load: [WithEnv], [AllowUnknown],
 // [WithDiagnostics] and [WithDiagnosticHandler].
 // [MakeLoader] and [Load] take it.
-type EnvOption interface {
+type LoaderOption interface {
 	LoadOption
 	applyEnv(*envSettings)
 }
@@ -36,6 +36,10 @@ type configSettings struct {
 
 // envSettings holds the resolved options of a load.
 type envSettings struct {
+	engine            Engine
+	engineSet         bool
+	engineErr         error
+	builtinOptions    bool
 	allowed           []string
 	env               environment
 	envRepeated       bool
@@ -69,7 +73,7 @@ func WithPrefix(prefix string) ConfigOption {
 // for unknown variables, for an environment shared with other programs. The
 // prefixes are copied. An empty prefix is ignored: it would match every variable
 // and turn the check off.
-func AllowUnknown(prefixes ...string) EnvOption {
+func AllowUnknown(prefixes ...string) LoaderOption {
 	// Copied here, like WithEnv's map: changing the caller's slice afterwards
 	// does not change what the option allows.
 	allowed := make([]string, 0, len(prefixes))
@@ -80,6 +84,7 @@ func AllowUnknown(prefixes ...string) EnvOption {
 	}
 
 	return envOption(func(s *envSettings) {
+		s.builtinOptions = true
 		s.allowed = append(s.allowed, allowed...)
 	})
 }

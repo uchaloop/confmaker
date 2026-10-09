@@ -2,7 +2,9 @@ package confmaker
 
 import (
 	"cmp"
+	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"sync"
@@ -51,10 +53,11 @@ var ErrLoadPanicked = errors.New("configuration loading panicked")
 // registration holds a compiled config or its declaration error.
 type registration struct {
 	descriptor
-	typeName string
-	name     string
-	err      error
-	fill     func(any, environment, *ConfigReport, *LoadReport) error
+	typeName   string
+	name       string
+	err        error
+	fill       func(any, environment, *ConfigReport, *LoadReport) error
+	fillEngine func(context.Context, Engine, any) error
 }
 
 // descriptor carries immutable schema and a factory for fresh defaults.
@@ -69,7 +72,7 @@ type descriptor struct {
 // MakeLoader returns an empty [Loader]. opts configure the whole load: [WithEnv],
 // [AllowUnknown], [WithDiagnostics] and [WithDiagnosticHandler].
 // A nil option is reported by [Loader.Load].
-func MakeLoader(opts ...EnvOption) *Loader {
+func MakeLoader(opts ...LoaderOption) *Loader {
 	l := &Loader{}
 	for _, opt := range opts {
 		if opt == nil {
@@ -108,11 +111,28 @@ func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
 
 	// Resolve the registration without holding the lock.
 	r := &registration{typeName: reflect.TypeFor[T]().String(), name: name}
-	r.descriptor, r.err = makeDescriptor[T](name, opts)
+	if l.env.engineSet {
+		r.descriptor, r.err = makeEngineDescriptor[T](name, opts)
+	} else {
+		r.descriptor, r.err = makeDescriptor[T](name, opts)
+	}
 	// Handles, including copies, share typed storage. Value exposes it only
 	// after Load publishes completion under the loader mutex.
 	value := new(T)
 	if r.err == nil {
+		r.fillEngine = func(ctx context.Context, engine Engine, target any) error {
+			cfg := target.(*T)
+			if err := engine.Load(ctx, LoadRequest{Name: name, Target: cfg}); err != nil {
+				return fmt.Errorf("config %q: %w", name, err)
+			}
+			if v, ok := any(cfg).(interface{ Validate() error }); ok {
+				if err := v.Validate(); err != nil {
+					return wrapConfigError(name, makeConfigError(ErrorValidation, "", "", err))
+				}
+			}
+			*value = *cfg
+			return nil
+		}
 		r.fill = func(defaults any, env environment, report *ConfigReport, loadReport *LoadReport) error {
 			cfg := defaults.(*T)
 			var onPanic func(error)
@@ -215,7 +235,7 @@ func (l *Loader) Load() error {
 
 // Load loads one config of type T, as a [Loader] with a single registration would.
 // The required name determines the default ENV prefix. Options include
-// [ConfigOption] ([WithPrefix]) and [EnvOption]
+// [ConfigOption] ([WithPrefix]) and [LoaderOption]
 // ([WithEnv], [AllowUnknown], [WithDiagnostics],
 // [WithDiagnosticHandler]). Unknown variables are looked for under
 // T's own prefix only. On error it returns the zero T.
@@ -225,14 +245,14 @@ func (l *Loader) Load() error {
 func Load[T any](name string, opts ...LoadOption) (T, error) {
 	var (
 		configOpts []ConfigOption
-		envOpts    []EnvOption
+		envOpts    []LoaderOption
 	)
 
 	for _, opt := range opts {
 		switch opt := opt.(type) {
 		case ConfigOption:
 			configOpts = append(configOpts, opt)
-		case EnvOption:
+		case LoaderOption:
 			envOpts = append(envOpts, opt)
 		default:
 			// Only nil gets here: the kinds are sealed. MakeLoader reports it.
@@ -329,6 +349,9 @@ func makeDescriptor[T any](name string, opts []ConfigOption) (descriptor, error)
 // load processes valid registrations and accumulates errors. Conflicts stop the
 // load before defaults; other errors do not prevent checking remaining configs.
 func (l *Loader) load(registrations []*registration, report *LoadReport) error {
+	if l.env.engineSet {
+		return l.loadEngine(context.Background(), registrations, report)
+	}
 	var errs []error
 	if report != nil {
 		defer func() {
