@@ -7,6 +7,8 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+Target release: **2.0.0** (Git tag `v2.0.0`; not yet released).
+
 ### Changed
 
 - **Breaking:** rename `EnvOption` to `LoaderOption`. ENV-specific options require
@@ -18,7 +20,6 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Add report `DetailLevel`: custom engines provide configuration outcomes;
   detailed field reports remain built-in. Custom-engine Manifest calls return
   `ErrManifestUnsupported` without running user code.
-
 
 - **Breaking:** move the module to `github.com/uchaloop/confmaker/v2`.
 - **Breaking:** replace separate diagnostic receivers with `Loader.Report()` and
