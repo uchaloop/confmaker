@@ -87,6 +87,11 @@ type LoadProblem struct {
 }
 
 // Report returns an independent snapshot without starting or waiting for a load.
+// Without collection it returns LoadDisabled. With collection enabled it returns
+// LoadNotStarted before loading and LoadInProgress during loading, with no details
+// in either state. Final reports have state LoadSucceeded, LoadFailed or LoadPanicked
+// and retain completed work. They contain no values, error text or panic payloads.
+// Report is safe to call concurrently; changing its result does not affect the loader.
 func (l *Loader) Report() LoadReport {
 	l.mu.Lock()
 	defer l.mu.Unlock()

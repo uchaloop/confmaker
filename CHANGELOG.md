@@ -7,7 +7,33 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
-- Prepare v2: loader-owned reports, optional manifest defaults, independent sensitivity marker, restricted pointers, and separate confexport/confcli packages.
+### Changed
+
+- **Breaking:** move the module to `github.com/uchaloop/confmaker/v2`.
+- **Breaking:** replace separate diagnostic receivers with `Loader.Report()` and
+  parameterless `WithDiagnostics()`. Reports distinguish disabled, pending,
+  running, succeeded, failed and panicked loads without exposing values or causes.
+- Publish the load result before invoking the diagnostic handler; skip the handler
+  on loading panic and preserve completed work in the final report.
+- **Breaking:** manifest generation describes schema by default. `IncludeDefaults()`
+  evaluates fresh instances explicitly; default states replace `HasDefault`, and
+  rendering problems retain the schema instead of failing the entire operation.
+- **Breaking:** support pointers only at one level over scalar or text types;
+  reject pointer chains, collection pointers and pointers inside collections.
+- Recognize sensitive fields through `env:",secret"` or the structural
+  `IsSensitive()` marker without a production dependency on secret. Older secret
+  versions require an explicit tag.
+
+### Added
+
+- Pure `confexport` writers for JSON format version 2, Markdown and ENV examples.
+- The optional `confcli` package for explicit describe-flag handling.
+
+### Removed
+
+- **Breaking:** core writer methods and describe-flag helpers; use `confexport`
+  and `confcli` with a prepared manifest.
+- **Breaking:** `Diagnostics`, `MakeDiagnostics` and the diagnostic receiver option.
 
 ## [1.0.1] - 2026-10-03
 

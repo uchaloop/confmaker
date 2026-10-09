@@ -10,7 +10,15 @@ use its tagged documentation.
 ## Loading
 
 ```go
-import "github.com/uchaloop/confmaker/v2"
+package main
+
+import (
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/uchaloop/confmaker/v2"
+)
 
 type StoreConfig struct {
     Host string `env:"HOST,notEmpty"`
@@ -22,13 +30,22 @@ func (c StoreConfig) Validate() error {
     return nil
 }
 
-loader := confmaker.MakeLoader()
-store := loader.Register[StoreConfig]("postgres")
-if err := loader.Load(); err != nil { return err }
-cfg, err := store.Value()
+func main() {
+    if err := run(); err != nil { log.Fatal(err) }
+}
+
+func run() error {
+    loader := confmaker.MakeLoader()
+    store := loader.Register[StoreConfig]("postgres")
+    if err := loader.Load(); err != nil { return err }
+    cfg, err := store.Value()
+    if err != nil { return err }
+    fmt.Println(cfg.Host, cfg.Timeout)
+    return nil
+}
 ```
 
-The example uses standard `fmt` and `time`. For one config use
+Set `POSTGRES_HOST` before running the example. For one config use
 `confmaker.Load[StoreConfig]("postgres")`. Config types need no confmaker import.
 `WithEnv(map[string]string{...})` replaces the entire process ENV and copies the
 map. A nil map means empty ENV. No files or external stores are read.
@@ -122,10 +139,10 @@ Handler panic propagates but does not change the published load result.
 ## Manifest and exports
 
 ```go
-schema, err := loader.Manifest() // No user methods or ENV reads.
+// Omit IncludeDefaults for schema only, without user methods or ENV reads.
 document, err := loader.Manifest(confmaker.IncludeDefaults())
-// Handle err before using either result.
-err = confexport.WriteMarkdown(writer, document)
+if err != nil { return err }
+if err := confexport.WriteMarkdown(writer, document); err != nil { return err }
 ```
 
 Import `github.com/uchaloop/confmaker/v2/confexport` for WriteJSON,

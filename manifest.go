@@ -45,13 +45,19 @@ type manifestOption func(*manifestSettings)
 func (manifestOption) describeOption()                     {}
 func (o manifestOption) applyManifest(s *manifestSettings) { o(s) }
 
-// IncludeDefaults evaluates defaults on fresh instances and renders nonzero values.
+// IncludeDefaults evaluates root defaults once per configuration on fresh instances
+// and renders nonzero values. Sensitive fields remain redacted and are never
+// marshaled. User panics propagate without changing the loader's load state.
 func IncludeDefaults() ManifestOption {
 	return manifestOption(func(s *manifestSettings) { s.defaults = true })
 }
 
 // Manifest describes a registration snapshot. Without IncludeDefaults it runs
-// no user methods. Schema errors return no result; render problems stay in the result.
+// no user methods and reads no ENV. Configurations are sorted by instance name;
+// variables follow declaration order. Returned slices are independent snapshots.
+// Schema errors return no result; render problems stay in the result with a nil
+// error. Loaded values are never used. Concurrent calls with IncludeDefaults
+// require user defaults and marshalers to support concurrent invocation.
 func (l *Loader) Manifest(opts ...ManifestOption) (ManifestResult, error) {
 	var settings manifestSettings
 	for _, o := range opts {
@@ -98,6 +104,8 @@ func (l *Loader) Manifest(opts ...ManifestOption) (ManifestResult, error) {
 }
 
 // Manifest describes one configuration with the same result model as Loader.Manifest.
+// Options may include ConfigOption values such as WithPrefix and ManifestOption
+// values such as IncludeDefaults. It does not load the configuration.
 func Manifest[T any](name string, opts ...DescribeOption) (ManifestResult, error) {
 	var configs []ConfigOption
 	var manifests []ManifestOption
