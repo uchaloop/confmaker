@@ -201,3 +201,44 @@ func TestManifestPanicDoesNotChangeLoad(t *testing.T) {
 		t.Fatal(l.Report())
 	}
 }
+
+func TestPanicReportPreservesEarlierFieldProblems(t *testing.T) {
+	type config struct {
+		A int        `env:"A"`
+		B panicField `env:"B"`
+	}
+	l := MakeLoader(WithDiagnostics(), WithEnv(map[string]string{"APP_A": "bad", "APP_B": "panic"}))
+	l.Register[config]("app")
+	func() { defer func() { _ = recover() }(); _ = l.Load() }()
+	r := l.Report()
+	if len(r.Problems) != 1 || r.Problems[0].Kind != ErrorParse || r.Problems[0].VariableName != "APP_A" {
+		t.Fatalf("lost earlier problem: %+v", r)
+	}
+	if r.Configs[0].Status != ConfigInterrupted {
+		t.Fatalf("interrupted status lost: %+v", r)
+	}
+}
+func TestPanicReportDoesNotOverwriteExecutionStatus(t *testing.T) {
+	type untouched struct {
+		Value int `env:"VALUE"`
+	}
+	l := MakeLoader(WithDiagnostics(), WithEnv(map[string]string{"APP_TYPO": "x", "LATER_TYPO": "y"}))
+	l.Register[diagnosticPanics]("app")
+	l.Register[untouched]("later")
+	func() { defer func() { _ = recover() }(); _ = l.Load() }()
+	r := l.Report()
+	if len(r.Problems) != 2 || r.Configs[0].Status != ConfigInterrupted || r.Configs[1].Status != ConfigNotProcessed {
+		t.Fatalf("incorrect panic report: %+v", r)
+	}
+}
+
+func TestReportReflectsPublishedLoadingState(t *testing.T) {
+	// Load publishes its lifecycle under the mutex before allocating detail slices.
+	l := MakeLoader(WithDiagnostics())
+	l.mu.Lock()
+	l.state = loading
+	l.mu.Unlock()
+	if l.Report().State != LoadInProgress {
+		t.Fatal(l.Report())
+	}
+}

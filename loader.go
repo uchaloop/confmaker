@@ -54,7 +54,7 @@ type registration struct {
 	typeName string
 	name     string
 	err      error
-	fill     func(any, environment, *ConfigReport) error
+	fill     func(any, environment, *ConfigReport, *LoadReport) error
 }
 
 // descriptor carries immutable schema and a factory for fresh defaults.
@@ -113,9 +113,13 @@ func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
 	// after Load publishes completion under the loader mutex.
 	value := new(T)
 	if r.err == nil {
-		r.fill = func(defaults any, env environment, report *ConfigReport) error {
+		r.fill = func(defaults any, env environment, report *ConfigReport, loadReport *LoadReport) error {
 			cfg := defaults.(*T)
-			if err := applyAndValidate(cfg, r.fields, r.instanceName, env, report); err != nil {
+			var onPanic func(error)
+			if loadReport != nil {
+				onPanic = func(err error) { recordLoadProblems(loadReport, wrapConfigError(r.instanceName, err)) }
+			}
+			if err := applyAndValidate(cfg, r.fields, r.instanceName, env, report, onPanic); err != nil {
 				return err
 			}
 
@@ -392,7 +396,7 @@ func (l *Loader) load(registrations []*registration, report *LoadReport) error {
 			configReport.Status = ConfigInterrupted
 		}
 
-		err := registrations[index].fill(configs[i], env, configReport)
+		err := registrations[index].fill(configs[i], env, configReport, report)
 		if configReport != nil {
 			configReport.Status = ConfigSucceeded
 			if err != nil {

@@ -24,7 +24,7 @@ reporting so it can be assessed before disclosure.
 
 Use GitHub's **Report a vulnerability** action in the repository's Security tab:
 
-[Report privately](https://github.com/uchaloop/confmaker/v2/security/advisories/new)
+[Report privately](https://github.com/uchaloop/confmaker/security/advisories/new)
 
 Do not publish exploit details in an issue or pull request before discussing
 them privately with the maintainer.

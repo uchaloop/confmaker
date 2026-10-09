@@ -232,8 +232,8 @@ func compileField(
 // applyAndValidate applies the environment over the defaults already in cfg and
 // validates the result. Validate runs only when every variable parsed: a
 // half-filled config would report problems that are not there.
-func applyAndValidate[T any](cfg *T, fields []fieldSpec, name string, env environment, report *ConfigReport) error {
-	if err := applyEnvironment(reflect.ValueOf(cfg).Elem(), fields, env, report); err != nil {
+func applyAndValidate[T any](cfg *T, fields []fieldSpec, name string, env environment, report *ConfigReport, onPanic func(error)) error {
+	if err := applyEnvironment(reflect.ValueOf(cfg).Elem(), fields, env, report, onPanic); err != nil {
 		return wrapConfigError(name, err)
 	}
 
@@ -253,8 +253,14 @@ func applyAndValidate[T any](cfg *T, fields []fieldSpec, name string, env enviro
 // A variable that is not set
 // leaves its field untouched - that is what preserves the values SetDefaults
 // established - and every problem is reported together.
-func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environment, report *ConfigReport) error {
+func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environment, report *ConfigReport, onPanic func(error)) error {
 	var errs []error
+	finished := false
+	defer func() {
+		if !finished && onPanic != nil {
+			onPanic(errors.Join(errs...))
+		}
+	}()
 
 	for i, b := range fieldSpecs {
 		raw, set := env[b.Name]
@@ -314,6 +320,7 @@ func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environmen
 		}
 	}
 
+	finished = true
 	return errors.Join(errs...)
 }
 

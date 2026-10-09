@@ -93,6 +93,9 @@ func (l *Loader) Report() LoadReport {
 	if !l.env.diagnostics {
 		return LoadReport{State: LoadDisabled}
 	}
+	if l.state == loading {
+		return LoadReport{State: LoadInProgress}
+	}
 	if l.report.State == "" {
 		return LoadReport{State: LoadNotStarted}
 	}
@@ -172,6 +175,17 @@ func makeLoadReport(registrations []*registration) *LoadReport {
 }
 
 func setLoadReportState(report *LoadReport, err error) {
+	if err != ErrLoadPanicked {
+		for _, p := range report.Problems {
+			if p.InstanceName != "" {
+				for i := range report.Configs {
+					if report.Configs[i].InstanceName == p.InstanceName {
+						report.Configs[i].Status = ConfigFailed
+					}
+				}
+			}
+		}
+	}
 	switch {
 	case err == ErrLoadPanicked:
 		report.State = LoadPanicked
@@ -188,16 +202,6 @@ func recordLoadProblems(report *LoadReport, err error) {
 	case *ConfigError:
 		if problem == nil {
 			return
-		}
-
-		if len(problem.InstanceName) != 0 {
-			for i := range report.Configs {
-				if report.Configs[i].InstanceName != problem.InstanceName {
-					continue
-				}
-
-				report.Configs[i].Status = ConfigFailed
-			}
 		}
 
 		report.Problems = append(report.Problems, LoadProblem{
