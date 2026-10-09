@@ -275,6 +275,9 @@ func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environmen
 			continue
 		}
 
+		if variable != nil {
+			variable.Status = VariableInterrupted
+		}
 		if err := b.parse(root.FieldByIndex(b.index), raw); err != nil {
 			if variable != nil {
 				variable.Status = VariableFailed

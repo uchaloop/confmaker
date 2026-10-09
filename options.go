@@ -38,7 +38,7 @@ type envSettings struct {
 	allowed           []string
 	env               environment
 	envRepeated       bool
-	diagnostics       *Diagnostics
+	diagnostics       bool
 	diagnosticHandler func(LoadReport)
 	diagnosticErr     error
 }

@@ -30,8 +30,7 @@ func TestSecretLoadingAndDescription(t *testing.T) {
 			env["APP_PASSWORD"] = "private-env"
 		}
 
-		diagnostics := confmaker.MakeDiagnostics()
-		loader := confmaker.MakeLoader(confmaker.WithEnv(env), confmaker.WithDiagnostics(diagnostics))
+		loader := confmaker.MakeLoader(confmaker.WithEnv(env), confmaker.WithDiagnostics())
 		handle := loader.Register[secretConfig]("app")
 		for _, write := range []func(io.Writer) error{loader.WriteEnvExample, loader.WriteManifestJSON, loader.WriteManifestMarkdown} {
 			var output bytes.Buffer
@@ -62,7 +61,7 @@ func TestSecretLoadingAndDescription(t *testing.T) {
 			t.Fatal("incorrect secret loading")
 		}
 
-		report := diagnostics.Report()
+		report := loader.Report()
 		variables := report.Configs[0].Variables
 		if variables[0].Source != source || variables[1].Source != confmaker.SourceZero || variables[2].Source != confmaker.SourceEnv {
 			t.Fatal("incorrect diagnostic sources")

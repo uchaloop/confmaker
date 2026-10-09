@@ -3,13 +3,13 @@ package confmaker
 import (
 	"errors"
 	"slices"
-	"sync"
 )
 
 // LoadState describes the progress of one load.
 type LoadState string
 
 const (
+	LoadDisabled   LoadState = "disabled"
 	LoadNotStarted LoadState = "not_started"
 	LoadInProgress LoadState = "in_progress"
 	LoadSucceeded  LoadState = "succeeded"
@@ -21,6 +21,7 @@ const (
 type ConfigStatus string
 
 const (
+	ConfigInterrupted  ConfigStatus = "interrupted"
 	ConfigNotProcessed ConfigStatus = "not_processed"
 	ConfigSucceeded    ConfigStatus = "succeeded"
 	ConfigFailed       ConfigStatus = "failed"
@@ -30,6 +31,7 @@ const (
 type VariableStatus string
 
 const (
+	VariableInterrupted  VariableStatus = "interrupted"
 	VariableNotProcessed VariableStatus = "not_processed"
 	VariableSucceeded    VariableStatus = "succeeded"
 	VariableFailed       VariableStatus = "failed"
@@ -84,54 +86,17 @@ type LoadProblem struct {
 	FieldPath    string
 }
 
-// Diagnostics stores the report of one Loader. Its zero value is ready for use.
-// It is safe for concurrent use and must not be copied after first use.
-type Diagnostics struct {
-	mu     sync.Mutex
-	owner  *Loader
-	report LoadReport
-}
-
-// MakeDiagnostics creates a report receiver for one loader.
-func MakeDiagnostics() *Diagnostics { return &Diagnostics{} }
-
-// Report returns an independent snapshot. Before loading it reports
-// LoadNotStarted; during loading it reports LoadInProgress without partial results.
-// Reading a report never loads configs or waits for user callbacks.
-func (d *Diagnostics) Report() LoadReport {
-	d.mu.Lock()
-	report := d.report
-	d.mu.Unlock()
-
-	// Published reports are immutable; copy outside the lock.
-	report = cloneLoadReport(report)
-	if len(report.State) == 0 {
-		report.State = LoadNotStarted
+// Report returns an independent snapshot without starting or waiting for a load.
+func (l *Loader) Report() LoadReport {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.env.diagnostics {
+		return LoadReport{State: LoadDisabled}
 	}
-
-	return report
-}
-
-func (d *Diagnostics) bindLoader(loader *Loader) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if d.owner != nil && d.owner != loader {
-		return makeConfigError(ErrorDeclaration, "", "", errors.New("diagnostics already belongs to another loader"))
+	if l.report.State == "" {
+		return LoadReport{State: LoadNotStarted}
 	}
-
-	d.owner = loader
-
-	return nil
-}
-
-// publishReport takes ownership of report. Neither the caller nor a handler may
-// mutate its slices after publication; public readers receive independent copies.
-func (d *Diagnostics) publishReport(report LoadReport) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	d.report = report
+	return cloneLoadReport(l.report)
 }
 
 func cloneLoadReport(report LoadReport) LoadReport {
@@ -145,18 +110,10 @@ func cloneLoadReport(report LoadReport) LoadReport {
 	return report
 }
 
-// WithDiagnostics enables collection into diagnostics. A nil receiver, repeated
-// option or receiver already owned by another loader is a declaration error.
-func WithDiagnostics(diagnostics *Diagnostics) EnvOption {
-	return envOption(func(s *envSettings) {
-		if diagnostics == nil || s.diagnostics != nil {
-			s.diagnosticErr = makeConfigError(ErrorDeclaration, "", "", errors.New("WithDiagnostics requires one non-nil receiver"))
-
-			return
-		}
-
-		s.diagnostics = diagnostics
-	})
+// WithDiagnostics enables collection of value-free reports on the loader.
+// Repeated use is harmless.
+func WithDiagnostics() EnvOption {
+	return envOption(func(s *envSettings) { s.diagnostics = true })
 }
 
 // WithDiagnosticHandler enables collection and calls handler synchronously once
@@ -175,6 +132,7 @@ func WithDiagnosticHandler(handler func(LoadReport)) EnvOption {
 		}
 
 		s.diagnosticHandler = handler
+		s.diagnostics = true
 	})
 }
 
@@ -215,7 +173,7 @@ func makeLoadReport(registrations []*registration) *LoadReport {
 
 func setLoadReportState(report *LoadReport, err error) {
 	switch {
-	case err == errLoadPanicked:
+	case err == ErrLoadPanicked:
 		report.State = LoadPanicked
 	case err != nil:
 		report.State = LoadFailed

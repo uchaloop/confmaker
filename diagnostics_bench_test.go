@@ -26,7 +26,7 @@ func BenchmarkLoadDiagnostics(b *testing.B) {
 				for b.Loop() {
 					options := []EnvOption{envOption}
 					if mode == "receiver" || mode == "both" {
-						options = append(options, WithDiagnostics(MakeDiagnostics()))
+						options = append(options, WithDiagnostics())
 					}
 
 					if mode == "handler" || mode == "both" {

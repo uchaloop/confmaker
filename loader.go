@@ -32,6 +32,7 @@ type Loader struct {
 	registrations []*registration
 	done          chan struct{}
 	err           error
+	report        LoadReport
 }
 
 // loaderState tracks registration, loading and completion.
@@ -43,9 +44,9 @@ const (
 	loaded
 )
 
-// errLoadPanicked is the result of a load that user code panicked out of. The
+// ErrLoadPanicked is the result of a load that user code panicked out of. The
 // panic itself propagates from the Load call that ran it.
-var errLoadPanicked = errors.New("configuration loading panicked")
+var ErrLoadPanicked = errors.New("configuration loading panicked")
 
 // registration holds a compiled config or its declaration error.
 type registration struct {
@@ -78,13 +79,6 @@ func MakeLoader(opts ...EnvOption) *Loader {
 		}
 
 		opt.applyEnv(&l.env)
-	}
-
-	if l.env.diagnostics != nil {
-		if err := l.env.diagnostics.bindLoader(l); err != nil {
-			l.envErr = errors.Join(l.envErr, err)
-			l.env.diagnostics = nil
-		}
 	}
 
 	l.envErr = errors.Join(l.envErr, l.env.diagnosticErr)
@@ -178,14 +172,14 @@ func (l *Loader) Load() error {
 
 	sortRegistrations(registrations)
 	var report *LoadReport
-	if l.env.diagnostics != nil || l.env.diagnosticHandler != nil {
+	if l.env.diagnostics {
 		report = makeLoadReport(registrations)
-		if l.env.diagnostics != nil {
-			l.env.diagnostics.publishReport(LoadReport{State: LoadInProgress})
-		}
+		l.mu.Lock()
+		l.report = LoadReport{State: LoadInProgress}
+		l.mu.Unlock()
 	}
 
-	err := errLoadPanicked
+	err := ErrLoadPanicked
 	defer func() {
 		if report != nil {
 			setLoadReportState(report, err)
@@ -194,20 +188,15 @@ func (l *Loader) Load() error {
 		l.mu.Lock()
 		l.err = err
 		l.state = loaded
-		if report != nil && l.env.diagnostics != nil {
-			l.env.diagnostics.publishReport(*report)
+		if report != nil {
+			l.report = *report
 		}
 
 		close(l.done)
 		l.mu.Unlock()
 
-		if report != nil && err != errLoadPanicked && l.env.diagnosticHandler != nil {
-			handlerReport := *report
-			if l.env.diagnostics != nil {
-				// The receiver owns the published slices; isolate the handler from them.
-				handlerReport = cloneLoadReport(handlerReport)
-			}
-
+		if report != nil && err != ErrLoadPanicked && l.env.diagnosticHandler != nil {
+			handlerReport := cloneLoadReport(*report)
 			l.env.diagnosticHandler(handlerReport)
 		}
 	}()
@@ -383,7 +372,13 @@ func (l *Loader) load(registrations []*registration, report *LoadReport) error {
 
 	configs := make([]any, len(readyIndices))
 	for i, index := range readyIndices {
+		if report != nil {
+			report.Configs[index].Status = ConfigInterrupted
+		}
 		configs[i] = registrations[index].defaults()
+		if report != nil {
+			report.Configs[index].Status = ConfigNotProcessed
+		}
 	}
 
 	if err := checkUnknown(descriptors, known, l.env.allowed, env); err != nil {
@@ -394,6 +389,7 @@ func (l *Loader) load(registrations []*registration, report *LoadReport) error {
 		var configReport *ConfigReport
 		if report != nil {
 			configReport = &report.Configs[index]
+			configReport.Status = ConfigInterrupted
 		}
 
 		err := registrations[index].fill(configs[i], env, configReport)
