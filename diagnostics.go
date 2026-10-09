@@ -49,15 +49,27 @@ const (
 	SourceMissing ValueSource = "missing"
 )
 
+// DetailLevel identifies the information available in a final report.
+type DetailLevel string
+
+const (
+	// DetailConfig provides registration outcomes without field information.
+	DetailConfig DetailLevel = "config"
+	// DetailField includes the built-in engine's field-level diagnostics.
+	DetailField DetailLevel = "field"
+)
+
 // LoadReport is a value-free snapshot. Problems never contain error messages or
 // causes. Configs include invalid registrations, whose fields may be unavailable.
 // Successful fields do not imply successful config validation or loading.
 // After a panic, completed stages retain their problems; the interrupted stage
 // may be incomplete.
 type LoadReport struct {
-	State    LoadState
-	Configs  []ConfigReport
-	Problems []LoadProblem
+	// DetailLevel is empty for disabled, not_started and in_progress snapshots.
+	DetailLevel DetailLevel
+	State       LoadState
+	Configs     []ConfigReport
+	Problems    []LoadProblem
 }
 
 // ConfigReport describes one registration, including its explicit name and Go type.

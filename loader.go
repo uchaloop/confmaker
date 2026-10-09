@@ -71,7 +71,7 @@ type descriptor struct {
 
 // MakeLoader returns an empty [Loader]. opts configure the whole load: [WithEnv],
 // [AllowUnknown], [WithDiagnostics] and [WithDiagnosticHandler].
-// A nil option is reported by [Loader.Load].
+// WithEngine selects a custom backend. A nil option is reported by [Loader.Load].
 func MakeLoader(opts ...LoaderOption) *Loader {
 	l := &Loader{}
 	for _, opt := range opts {
@@ -90,7 +90,8 @@ func MakeLoader(opts ...LoaderOption) *Loader {
 }
 
 // Register registers a struct config of type T and returns its [Handle].
-// The required name labels errors and determines the default ENV prefix:
+// The required name labels errors. Custom engines accept any nonempty unique name.
+// With the built-in engine, the name determines the default ENV prefix:
 // "read-replica" reads READ_REPLICA_*. [WithPrefix] overrides only the prefix.
 // Names must be non-empty, contain only lowercase letters, digits, _ - .,
 // and start and end with a letter or digit.
@@ -221,6 +222,10 @@ func (l *Loader) LoadContext(ctx context.Context) error {
 	var report *LoadReport
 	if l.env.diagnostics {
 		report = makeLoadReport(registrations)
+		report.DetailLevel = DetailField
+		if l.env.engineSet {
+			report.DetailLevel = DetailConfig
+		}
 		l.mu.Lock()
 		l.report = LoadReport{State: LoadInProgress}
 		l.mu.Unlock()
@@ -401,6 +406,15 @@ func (l *Loader) load(ctx context.Context, registrations []*registration, report
 		errs = append(errs, makeConfigError(ErrorDeclaration, "", "", errors.New("WithEnv is given more than once; pass one complete environment")))
 	}
 
+	if err := checkIdentityConflicts(registrations); err != nil {
+		for _, r := range registrations {
+			if r.err != nil {
+				errs = append(errs, r.err)
+			}
+		}
+		errs = append(errs, err)
+		return errors.Join(errs...)
+	}
 	readyIndices := make([]int, 0, len(registrations))
 	for index, registration := range registrations {
 		if registration.err != nil {
@@ -438,6 +452,9 @@ func (l *Loader) load(ctx context.Context, registrations []*registration, report
 			report.Configs[index].Status = ConfigInterrupted
 		}
 		configs[i] = registrations[index].defaults()
+		if ctx.Err() != nil {
+			return errors.Join(append(errs, ctx.Err())...)
+		}
 		if report != nil {
 			report.Configs[index].Status = ConfigNotProcessed
 		}
@@ -458,7 +475,7 @@ func (l *Loader) load(ctx context.Context, registrations []*registration, report
 		}
 
 		err := registrations[index].fill(ctx, configs[i], env, configReport, report)
-		if configReport != nil && ctx.Err() == nil {
+		if configReport != nil && (err == nil || ctx.Err() == nil || !errors.Is(err, ctx.Err())) {
 			configReport.Status = ConfigSucceeded
 			if err != nil {
 				configReport.Status = ConfigFailed

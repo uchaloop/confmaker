@@ -82,15 +82,13 @@ func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *L
 	if l.env.builtinOptions {
 		errs = append(errs, errors.New("ENV options require the built-in engine"))
 	}
-	names := make(map[string]bool)
 	for _, r := range regs {
 		if r.err != nil {
 			errs = append(errs, wrapConfigError(r.name, r.err))
 		}
-		if names[r.name] {
-			errs = append(errs, fmt.Errorf("duplicate configuration name %q", r.name))
-		}
-		names[r.name] = true
+	}
+	if err := checkIdentityConflicts(regs); err != nil {
+		errs = append(errs, err)
 	}
 	if len(errs) != 0 {
 		return errors.Join(errs...)
@@ -104,6 +102,9 @@ func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *L
 			report.Configs[i].Status = ConfigInterrupted
 		}
 		configs[i] = r.defaults()
+		if ctx.Err() != nil {
+			return errors.Join(append(errs, ctx.Err())...)
+		}
 		if report != nil {
 			report.Configs[i].Status = ConfigNotProcessed
 		}
@@ -116,7 +117,7 @@ func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *L
 			report.Configs[i].Status = ConfigInterrupted
 		}
 		err := r.fillEngine(ctx, l.env.engine, configs[i])
-		if report != nil && ctx.Err() == nil {
+		if report != nil && (err == nil || ctx.Err() == nil || !errors.Is(err, ctx.Err())) {
 			report.Configs[i].Status = ConfigSucceeded
 			if err != nil {
 				report.Configs[i].Status = ConfigFailed
@@ -125,6 +126,20 @@ func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *L
 		if err != nil {
 			errs = append(errs, err)
 		}
+	}
+	return errors.Join(errs...)
+}
+
+// Identity is checked before schema filtering so even invalid declarations reserve
+// their names for the common preflight check.
+func checkIdentityConflicts(regs []*registration) error {
+	seen := make(map[string]bool)
+	var errs []error
+	for _, r := range regs {
+		if seen[r.name] {
+			errs = append(errs, wrapConfigError(r.name, makeConfigError(ErrorConflict, "", "", fmt.Errorf("instance name %q is registered more than once", r.name))))
+		}
+		seen[r.name] = true
 	}
 	return errors.Join(errs...)
 }

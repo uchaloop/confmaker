@@ -5,6 +5,9 @@ import (
 	"slices"
 )
 
+// ErrManifestUnsupported indicates that a custom engine does not provide manifests.
+var ErrManifestUnsupported = errors.New("manifest requires the built-in engine")
+
 // Variable describes a field using the same schema that loads it.
 type Variable struct {
 	Name, FieldPath, Description, Type string
@@ -52,13 +55,17 @@ func IncludeDefaults() ManifestOption {
 	return manifestOption(func(s *manifestSettings) { s.defaults = true })
 }
 
-// Manifest describes a registration snapshot. Without IncludeDefaults it runs
+// Manifest returns ErrManifestUnsupported for custom engines without calling user code.
+// With the built-in engine it describes a registration snapshot. Without IncludeDefaults it runs
 // no user methods and reads no ENV. Configurations are sorted by instance name;
 // variables follow declaration order. Returned slices are independent snapshots.
 // Schema errors return no result; render problems stay in the result with a nil
 // error. Loaded values are never used. Concurrent calls with IncludeDefaults
 // require user defaults and marshalers to support concurrent invocation.
 func (l *Loader) Manifest(opts ...ManifestOption) (ManifestResult, error) {
+	if l.env.engineSet {
+		return ManifestResult{}, ErrManifestUnsupported
+	}
 	var settings manifestSettings
 	for _, o := range opts {
 		if o == nil {

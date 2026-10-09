@@ -3,6 +3,7 @@ package confmaker
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -99,5 +100,39 @@ func TestEngineOptions(t *testing.T) {
 	l.Register[engineConfig]("x", WithPrefix("X_"))
 	if l.Load() == nil {
 		t.Fatal("prefix accepted")
+	}
+}
+
+type duplicateIdentityConfig struct{}
+
+var duplicateIdentityCalls int
+
+func (*duplicateIdentityConfig) SetDefaults()    { duplicateIdentityCalls++ }
+func (*duplicateIdentityConfig) Validate() error { duplicateIdentityCalls++; return nil }
+func TestEngineDuplicateIdentityIncludesInvalidDeclarations(t *testing.T) {
+	for _, builtin := range []bool{true, false} {
+		duplicateIdentityCalls = 0
+		opts := []LoaderOption{WithDiagnostics()}
+		if builtin {
+			opts = append(opts, WithEnv(nil))
+		} else {
+			opts = append(opts, WithEngine(EngineFunc(func(context.Context, LoadRequest) error { t.Fatal("backend called"); return nil })))
+		}
+		l := MakeLoader(opts...)
+		l.Register[int]("same")
+		l.Register[duplicateIdentityConfig]("same")
+		err := l.Load()
+		if err == nil || !strings.Contains(err.Error(), "same") || duplicateIdentityCalls != 0 {
+			t.Fatalf("builtin=%v calls=%d err=%v", builtin, duplicateIdentityCalls, err)
+		}
+		found := false
+		for _, p := range l.Report().Problems {
+			if p.Kind == ErrorConflict {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("missing identity conflict", l.Report())
+		}
 	}
 }
