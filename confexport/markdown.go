@@ -1,7 +1,8 @@
-package confmaker
+package confexport
 
 import (
 	"fmt"
+	c "github.com/uchaloop/confmaker/v2"
 	"io"
 	"strings"
 )
@@ -15,11 +16,7 @@ import (
 // It uses Loader.Manifest's snapshot and lifecycle without reading ENV or
 // loading configs. Manifest errors leave writer untouched. Writer errors are
 // returned and may leave partial output. The caller owns file handling.
-func (l *Loader) WriteManifestMarkdown(writer io.Writer) error {
-	configs, err := l.Manifest(IncludeDefaults())
-	if err != nil {
-		return err
-	}
+func WriteMarkdown(writer io.Writer, configs c.ManifestResult) error {
 
 	var output strings.Builder
 	output.WriteString("# Configuration manifest\n")
@@ -41,7 +38,10 @@ func (l *Loader) WriteManifestMarkdown(writer io.Writer) error {
 			}
 
 			defaultText := "—"
-			if !variable.Secret && (variable.Default.State == DefaultRendered) {
+			if variable.Default.State == c.DefaultUnrenderable {
+				defaultText = "Cannot render"
+			}
+			if !variable.Secret && (variable.Default.State == c.DefaultRendered) {
 				defaultText = escapeManifestMarkdownText(variable.Default.Text)
 			}
 

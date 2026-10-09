@@ -1,8 +1,10 @@
-package confmaker
+package confcli
 
 import (
 	"flag"
 	"fmt"
+	c "github.com/uchaloop/confmaker/v2"
+	"github.com/uchaloop/confmaker/v2/confexport"
 	"io"
 )
 
@@ -42,14 +44,14 @@ func (d *DescribeFlag) Requested() bool {
 // Write exports the selected format through loader to writer. It does not load
 // configurations. Calling Write without selecting a format returns an error.
 // Export and writer errors are passed through unchanged. loader must be non-nil.
-func (d *DescribeFlag) Write(loader *Loader, writer io.Writer) error {
+func (d *DescribeFlag) Write(writer io.Writer, manifest c.ManifestResult) error {
 	switch d.format {
 	case "env":
-		return loader.WriteEnvExample(writer)
+		return confexport.WriteEnvExample(writer, manifest)
 	case "markdown":
-		return loader.WriteManifestMarkdown(writer)
+		return confexport.WriteMarkdown(writer, manifest)
 	case "json":
-		return loader.WriteManifestJSON(writer)
+		return confexport.WriteJSON(writer, manifest)
 	default:
 		return fmt.Errorf("no description format selected; parse -describe before Write")
 	}

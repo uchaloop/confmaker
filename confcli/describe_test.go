@@ -1,9 +1,11 @@
-package confmaker
+package confcli
 
 import (
 	"bytes"
 	"errors"
 	"flag"
+	. "github.com/uchaloop/confmaker/v2"
+	"github.com/uchaloop/confmaker/v2/confexport"
 	"io"
 	"testing"
 )
@@ -26,20 +28,26 @@ func TestDescribeFlag(t *testing.T) {
 			}
 
 			loader := MakeLoader()
-			handle := loader.Register[envExampleConfig]("app")
+			handle := loader.Register[struct {
+				Host string `env:"HOST"`
+			}]("app")
+			manifest, err := loader.Manifest()
+			if err != nil {
+				t.Fatal(err)
+			}
 			var got, want bytes.Buffer
-			if err := describe.Write(loader, &got); err != nil {
+			if err := describe.Write(&got, manifest); err != nil {
 				t.Fatal(err)
 			}
 
-			var err error
+			err = nil
 			switch format {
 			case "env":
-				err = loader.WriteEnvExample(&want)
+				err = confexport.WriteEnvExample(&want, manifest)
 			case "markdown":
-				err = loader.WriteManifestMarkdown(&want)
+				err = confexport.WriteMarkdown(&want, manifest)
 			case "json":
-				err = loader.WriteManifestJSON(&want)
+				err = confexport.WriteJSON(&want, manifest)
 			}
 
 			if err != nil || got.String() != want.String() {
@@ -51,7 +59,7 @@ func TestDescribeFlag(t *testing.T) {
 			}
 
 			cause := errors.New("writer failure")
-			if err := describe.Write(loader, exampleErrorWriter{cause}); !errors.Is(err, cause) {
+			if err := describe.Write(exampleErrorWriter{cause}, manifest); !errors.Is(err, cause) {
 				t.Fatalf("writer error: %v", err)
 			}
 		})
@@ -73,7 +81,7 @@ func TestDescribeFlagInvalidOrAbsent(t *testing.T) {
 		}
 
 		var output bytes.Buffer
-		if err := describe.Write(MakeLoader(), &output); err == nil || output.Len() != 0 {
+		if err := describe.Write(&output, ManifestResult{}); err == nil || output.Len() != 0 {
 			t.Fatalf("missing format: %v", err)
 		}
 	}
@@ -88,3 +96,7 @@ func TestDescribeFlagInvalidOrAbsent(t *testing.T) {
 		t.Fatal("flag sets share state")
 	}
 }
+
+type exampleErrorWriter struct{ err error }
+
+func (w exampleErrorWriter) Write([]byte) (int, error) { return 0, w.err }

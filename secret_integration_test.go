@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/uchaloop/confmaker/v2"
+	"github.com/uchaloop/confmaker/v2/confexport"
 	"github.com/uchaloop/secret/v2"
 )
 
@@ -32,9 +33,13 @@ func TestSecretLoadingAndDescription(t *testing.T) {
 
 		loader := confmaker.MakeLoader(confmaker.WithEnv(env), confmaker.WithDiagnostics())
 		handle := loader.Register[secretConfig]("app")
-		for _, write := range []func(io.Writer) error{loader.WriteEnvExample, loader.WriteManifestJSON, loader.WriteManifestMarkdown} {
+		manifest, err := loader.Manifest(confmaker.IncludeDefaults())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, write := range []func(io.Writer, confmaker.ManifestResult) error{confexport.WriteEnvExample, confexport.WriteJSON, confexport.WriteMarkdown} {
 			var output bytes.Buffer
-			if err := write(&output); err != nil {
+			if err := write(&output, manifest); err != nil {
 				t.Fatal(err)
 			}
 

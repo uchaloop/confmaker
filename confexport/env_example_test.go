@@ -1,9 +1,10 @@
-package confmaker
+package confexport
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
+	. "github.com/uchaloop/confmaker/v2"
 	"io"
 	"strings"
 	"testing"
@@ -39,7 +40,7 @@ func (c envExampleConfig) Validate() error {
 
 func TestWriteEnvExample(t *testing.T) {
 	t.Setenv("APP_HOST", "environment-must-not-appear")
-	loader := MakeLoader()
+	loader := makeTestLoader()
 	config := loader.Register[envExampleConfig]("app")
 	var output bytes.Buffer
 	if err := loader.WriteEnvExample(&output); err != nil {
@@ -67,7 +68,7 @@ func TestWriteEnvExample(t *testing.T) {
 }
 
 func TestWriteEnvExampleEscapesCommentContent(t *testing.T) {
-	loader := MakeLoader()
+	loader := makeTestLoader()
 	loader.Register[struct {
 		Value string `env:"BAD\nINJECTED" envDescription:"first\rINJECTED=value\x00"`
 	}]("app")
@@ -92,7 +93,7 @@ type exampleErrorWriter struct{ err error }
 func (w exampleErrorWriter) Write(p []byte) (int, error) { return 0, w.err }
 
 func TestWriteEnvExampleErrors(t *testing.T) {
-	loader := MakeLoader()
+	loader := makeTestLoader()
 	loader.Register[envExampleConfig]("app")
 	writeErr := errors.New("writer failed")
 	if err := loader.WriteEnvExample(exampleErrorWriter{writeErr}); !errors.Is(err, writeErr) {
@@ -136,8 +137,8 @@ func TestEnvExampleAssignmentSyntax(t *testing.T) {
 	}
 }
 
-func ExampleLoader_WriteEnvExample() {
-	loader := MakeLoader()
+func ExampleWriteEnvExample() {
+	loader := makeTestLoader()
 	loader.Register[struct {
 		URL string `env:"URL,notEmpty" envDescription:"Service endpoint"`
 	}]("api")

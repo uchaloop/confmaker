@@ -1,7 +1,8 @@
-package confmaker
+package confexport
 
 import (
 	"fmt"
+	c "github.com/uchaloop/confmaker/v2"
 	"io"
 	"strings"
 )
@@ -20,11 +21,7 @@ import (
 // Manifest errors leave the writer untouched. Writer errors are returned and
 // may leave partial output. Defaults and marshalers have the same lifecycle as
 // Manifest. Secret values are never rendered.
-func (l *Loader) WriteEnvExample(writer io.Writer) error {
-	manifest, err := l.Manifest(IncludeDefaults())
-	if err != nil {
-		return err
-	}
+func WriteEnvExample(writer io.Writer, manifest c.ManifestResult) error {
 
 	var output strings.Builder
 	for _, config := range manifest.Configs {
@@ -48,7 +45,7 @@ func (l *Loader) WriteEnvExample(writer io.Writer) error {
 			switch {
 			case !isEnvExampleVariableName(variable.Name):
 				fmt.Fprintf(&output, "# Variable %q: set through your environment.\n", variable.Name)
-			case !variable.Secret && (variable.Default.State == DefaultRendered) && isEnvExampleDefaultSafe(variable.Default.Text):
+			case !variable.Secret && (variable.Default.State == c.DefaultRendered) && isEnvExampleDefaultSafe(variable.Default.Text):
 				fmt.Fprintf(&output, "%s=%s\n", variable.Name, variable.Default.Text)
 			default:
 				fmt.Fprintf(&output, "# %s=\n", variable.Name)

@@ -1,10 +1,11 @@
-package confmaker
+package confexport
 
 import (
 	"bytes"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
+	. "github.com/uchaloop/confmaker/v2"
 	"io"
 	"strings"
 	"testing"
@@ -12,7 +13,7 @@ import (
 
 func TestWriteManifestJSON(t *testing.T) {
 	t.Setenv("APP_HOST", "environment-must-not-appear")
-	loader := MakeLoader()
+	loader := makeTestLoader()
 	handle := loader.Register[envExampleConfig]("app")
 	loader.Register[struct{}]("aaa")
 	var output bytes.Buffer
@@ -32,7 +33,7 @@ func TestWriteManifestJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if document.Version != 1 || len(document.Configs) != 2 || document.Configs[0].Name != "aaa" || document.Configs[1].Prefix != "APP_" {
+	if document.Version != 2 || len(document.Configs) != 2 || document.Configs[0].Name != "aaa" || document.Configs[1].Prefix != "APP_" {
 		t.Fatalf("document: %+v", document)
 	}
 
@@ -41,19 +42,19 @@ func TestWriteManifestJSON(t *testing.T) {
 	}
 
 	fields := document.Configs[1].Variables
-	if fields[0]["name"] != "APP_HOST" || fields[0]["description"] != "API address\nUse the staging endpoint" || fields[0]["notEmpty"] != true || fields[0]["default"] != "https://api.example.test" {
+	if fields[0]["name"] != "APP_HOST" || fields[0]["description"] != "API address\nUse the staging endpoint" || fields[0]["notEmpty"] != true || fields[0]["default"].(map[string]any)["text"] != "https://api.example.test" {
 		t.Fatalf("host: %#v", fields[0])
 	}
 
-	if _, exists := fields[3]["default"]; exists {
+	if _, exists := fields[3]["default"].(map[string]any)["text"]; exists {
 		t.Fatal("secret default key present")
 	}
 
-	if fields[3]["secret"] != true || fields[3]["hasDefault"] != false {
+	if fields[3]["secret"] != true || fields[3]["default"].(map[string]any)["state"] != "redacted" {
 		t.Fatalf("secret metadata: %#v", fields[3])
 	}
 
-	if fields[1]["hasDefault"] != false || fields[1]["default"] != "" {
+	if fields[1]["default"].(map[string]any)["state"] != "zero" {
 		t.Fatalf("zero metadata: %#v", fields[1])
 	}
 
@@ -61,7 +62,7 @@ func TestWriteManifestJSON(t *testing.T) {
 		t.Fatal("runtime or secret value exposed")
 	}
 
-	if !strings.HasPrefix(output.String(), "{\n  \"version\": 1,") || !strings.HasSuffix(output.String(), "\n") {
+	if !strings.HasPrefix(output.String(), "{\n  \"version\": 2,") || !strings.HasSuffix(output.String(), "\n") {
 		t.Fatal("formatting")
 	}
 
@@ -71,7 +72,7 @@ func TestWriteManifestJSON(t *testing.T) {
 }
 
 func TestWriteManifestMarkdown(t *testing.T) {
-	loader := MakeLoader()
+	loader := makeTestLoader()
 	loader.Register[envExampleConfig]("app")
 	var output bytes.Buffer
 	if err := loader.WriteManifestMarkdown(&output); err != nil {
@@ -104,7 +105,7 @@ func TestManifestMarkdownEscaping(t *testing.T) {
 func TestManifestExportErrors(t *testing.T) {
 	for _, format := range []string{"json", "markdown"} {
 		t.Run(format, func(t *testing.T) {
-			loader := MakeLoader()
+			loader := makeTestLoader()
 			loader.Register[envExampleConfig]("app")
 			write := loader.WriteManifestJSON
 			if format == "markdown" {
@@ -131,17 +132,17 @@ func TestManifestExportErrors(t *testing.T) {
 
 func TestEmptyManifestJSON(t *testing.T) {
 	var output bytes.Buffer
-	if err := MakeLoader().WriteManifestJSON(&output); err != nil {
+	if err := makeTestLoader().WriteManifestJSON(&output); err != nil {
 		t.Fatal(err)
 	}
 
-	if output.String() != "{\n  \"version\": 1,\n  \"configs\": []\n}\n" {
+	if output.String() != "{\n  \"version\": 2,\n  \"configs\": [],\n  \"problems\": []\n}\n" {
 		t.Fatalf("empty manifest: %s", &output)
 	}
 }
 
-func ExampleLoader_WriteManifestMarkdown() {
-	loader := MakeLoader()
+func ExampleWriteMarkdown() {
+	loader := makeTestLoader()
 	loader.Register[struct {
 		URL string `env:"URL,notEmpty" envDescription:"Service endpoint"`
 	}]("api")
@@ -164,7 +165,7 @@ func ExampleLoader_WriteManifestMarkdown() {
 }
 
 func TestManifestExportRetainsSchema(t *testing.T) {
-	loader := MakeLoader()
+	loader := makeTestLoader()
 	loader.Register[struct {
 		Value failingDefaultText `env:"VALUE"`
 	}]("app")
@@ -177,8 +178,8 @@ func TestManifestExportRetainsSchema(t *testing.T) {
 	}
 }
 
-func ExampleLoader_WriteManifestJSON() {
-	loader := MakeLoader()
+func ExampleWriteJSON() {
+	loader := makeTestLoader()
 	var output bytes.Buffer
 	if err := loader.WriteManifestJSON(&output); err != nil {
 		panic(err)
@@ -187,8 +188,9 @@ func ExampleLoader_WriteManifestJSON() {
 	fmt.Print(output.String())
 	// Output:
 	// {
-	//   "version": 1,
-	//   "configs": []
+	//   "version": 2,
+	//   "configs": [],
+	//   "problems": []
 	// }
 }
 
