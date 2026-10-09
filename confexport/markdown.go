@@ -7,15 +7,9 @@ import (
 	"strings"
 )
 
-// WriteManifestMarkdown writes a section per config with its prefix and a
-// GitHub-flavored Markdown table of variables in manifest order. Columns show
-// ENV name, Go type, requirement, secret status, default and description.
-// Missing or secret defaults are shown as an em dash. Text is escaped for table
-// cells; description and default line breaks become HTML br elements.
-//
-// It uses Loader.Manifest's snapshot and lifecycle without reading ENV or
-// loading configs. Manifest errors leave writer untouched. Writer errors are
-// returned and may leave partial output. The caller owns file handling.
+// WriteMarkdown writes a prepared manifest as escaped Markdown tables.
+// Unrenderable defaults are marked; no user methods or ENV reads occur.
+// Writer errors may leave partial output.
 func WriteMarkdown(writer io.Writer, configs c.ManifestResult) error {
 
 	var output strings.Builder

@@ -7,20 +7,10 @@ import (
 	"strings"
 )
 
-// WriteEnvExample writes a reference .env.example for the same snapshot as
-// [Loader.Manifest]. It does not read ENV, load configs or open files.
-// Descriptions become comments. Only non-secret, non-zero scalar defaults made
-// of ASCII letters, digits and _./:@%+,- are emitted as active assignments.
-// Other fields become commented placeholders; complex defaults are not printed.
-// Required fields are marked even when they have a default. Zero defaults cannot
-// be distinguished from absent defaults and also become placeholders.
-//
-// Names outside [A-Za-z_][A-Za-z0-9_]* are quoted in comments, without changing
-// the names accepted by Load. The output is a reference, not a shell script or
-// a promise of compatibility with every dotenv parser.
-// Manifest errors leave the writer untouched. Writer errors are returned and
-// may leave partial output. Defaults and marshalers have the same lifecycle as
-// Manifest. Secret values are never rendered.
+// WriteEnvExample writes a prepared manifest as a reference ENV template.
+// Safe rendered text becomes an assignment; other values become placeholders.
+// Sensitive values are omitted. No user code executes; writer errors may leave
+// partial output. This is not a promise of compatibility with every dotenv parser.
 func WriteEnvExample(writer io.Writer, manifest c.ManifestResult) error {
 
 	var output strings.Builder

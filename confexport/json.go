@@ -34,14 +34,9 @@ type variableJSON struct {
 	KeyValSeparator string      `json:"keyValSeparator,omitzero"`
 }
 
-// WriteManifestJSON writes a version 1 manifest with fixed camelCase keys,
-// two-space indentation and a trailing newline. Empty lists are JSON arrays.
-// All variable metadata is included except secret defaults, whose default key
-// is omitted. hasDefault retains Manifest's non-zero-value semantics.
-//
-// It uses Loader.Manifest's snapshot and lifecycle: no ENV is read or config
-// loaded. Manifest and encoding errors leave writer untouched. Writer errors
-// are returned and may leave partial output. The caller owns file handling.
+// WriteJSON writes version 2 JSON from a prepared manifest. It preserves default
+// states and render problems without running user methods. Encoding failures
+// leave the writer untouched; writer errors may leave partial output.
 func WriteJSON(writer io.Writer, configs c.ManifestResult) error {
 
 	document := manifestJSON{Version: 2, Configs: make([]configManifestJSON, 0, len(configs.Configs))}

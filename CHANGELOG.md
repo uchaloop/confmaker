@@ -7,6 +7,8 @@ and this module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+- Prepare v2: loader-owned reports, optional manifest defaults, independent sensitivity marker, restricted pointers, and separate confexport/confcli packages.
+
 ## [1.0.1] - 2026-10-03
 
 - Set the minimum Go version to 1.27.0; CI uses the latest Go 1.27 patch release.
