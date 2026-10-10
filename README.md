@@ -323,27 +323,33 @@ Import `github.com/uchaloop/confmaker/v2/confcli` to add
 `-describe=env|markdown|json` to your application:
 
 ```go
-describe := confcli.MakeDescribeFlag(flags)
-if err := flags.Parse(args); err != nil {
+described, err := confcli.Describe(
+	loader,
+	args,
+	writer,
+	confmaker.IncludeDefaults(),
+)
+if err != nil {
 	return err
 }
 
-if describe.Requested() {
-	document, err := loader.Manifest(confmaker.IncludeDefaults())
-	if err != nil {
-		return err
-	}
-
-	return describe.Write(writer, document)
+if described {
+	return nil
 }
 
 return loader.Load()
 ```
 
-Register configurations before this fragment. `flags` is your `*flag.FlagSet`,
-`args` contains command-line arguments, and `writer` is an `io.Writer`.
-`confcli` is a helper package, not a standalone executable. It does not parse
-arguments automatically, load ENV, manage files or exit the process.
+Register configurations before this fragment. `args` contains command-line
+arguments without the executable name, and `writer` is an `io.Writer`.
+`Describe` accepts a loader or another `ManifestSource`, such as `confx.Modules`.
+Defaults are evaluated only with explicit `IncludeDefaults()`.
+
+The helper uses a private flag set. `-help` prints usage and returns `true, nil`;
+unknown flags and positional arguments return errors. Handle errors before deciding
+whether to continue startup. For applications with their own flags, use
+`MakeDescribeFlag` on your `*flag.FlagSet`, then `Requested` and `Write`.
+`confcli` does not load ENV, manage files or exit the process.
 
 ## Sensitive fields
 
