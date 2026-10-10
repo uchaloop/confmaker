@@ -4,7 +4,7 @@ All notable changes to this module are documented in this file.
 
 Entries are grouped by version and change type, with the newest version first.
 
-## [2.0.0] - Unreleased
+## [2.0.0]
 
 ### Added
 
@@ -429,7 +429,7 @@ its only dependencies.
   returns the masked type from the separate zero-dependency `github.com/uchaloop/secret`
   module, and the error names only the variable, never the value.
 
-[2.0.0]: https://github.com/uchaloop/confmaker/compare/v1.0.1...HEAD
+[2.0.0]: https://github.com/uchaloop/confmaker/compare/v1.0.1...v2.0.0
 [1.0.1]: https://github.com/uchaloop/confmaker/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/uchaloop/confmaker/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/uchaloop/confmaker/compare/v0.8.0...v0.9.0
