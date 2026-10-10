@@ -20,6 +20,7 @@ Entries are grouped by version and change type, with the newest version first.
 
 ### Changed
 
+- Updated the secret/v2 dependency to v2.2.0 for the structural sensitivity marker.
 - **Breaking:** Renamed `EnvOption` to `LoaderOption`. ENV-specific options require the
   built-in engine and cannot be mixed with a custom engine.
 - **Breaking:** Moved the module to `github.com/uchaloop/confmaker/v2`.
