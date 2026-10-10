@@ -393,7 +393,7 @@ include nested modules. See [CONTRIBUTING.md](CONTRIBUTING.md) for development r
 - [Core API and runnable examples](https://pkg.go.dev/github.com/uchaloop/confmaker/v2)
 - [Manifest exporters](https://pkg.go.dev/github.com/uchaloop/confmaker/v2/confexport)
 - [Application describe flag](https://pkg.go.dev/github.com/uchaloop/confmaker/v2/confcli)
-- [Fx adapter](https://github.com/uchaloop/confx): use confx v0.5.0 or later for this API
+- [Fx adapter](https://github.com/uchaloop/confx): use the latest version of confx
 - [Changelog](CHANGELOG.md), [contributing](CONTRIBUTING.md), [security policy](SECURITY.md)
 - [MIT license](LICENSE)
 
