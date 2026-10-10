@@ -255,6 +255,14 @@ options. `WithEnv`, `AllowUnknown` and registration-level `WithPrefix` require t
 built-in engine: mixing them with a custom engine is an error, regardless of order.
 Nil (including typed nil) or repeated `WithEngine` is an error.
 
+### More adapters
+
+Runnable and tested adapters for **env/v11, Viper, koanf, YAML and TOML** are in
+[examples/engines](examples/engines/README.md). Each uses the backend's own tags
+and decoding rules. Viper demonstrates YAML with `mapstructure` tags; koanf shows
+TOML with layered sources. Their dependencies live in a separate examples module,
+not in confmaker's core. See the examples for differences and error-handling limits.
+
 ## Errors and diagnostics
 
 `Load` aggregates problems. `ConfigErrors(err)` extracts structured kinds and

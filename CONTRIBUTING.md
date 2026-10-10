@@ -196,3 +196,11 @@ Core tests must not import external secret packages. Use the internal test fixtu
 for the structural sensitivity contract. Real secret compatibility tests live in
 `integration/secret`; see its README for commands. Its relative core replacement
 is intentional and must not be added to the root module.
+
+## Engine examples
+
+`examples/engines` is a separate module with pinned third-party dependencies.
+Run its build, vet and race tests with `GOWORK=off` when changing adapters or the
+engine contract. The root test pattern skips it. Keep adapters application-local,
+use `make…` constructors and explicit source snapshots, and document native decoder
+semantics rather than promising the built-in engine's behavior.
