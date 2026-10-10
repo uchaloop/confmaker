@@ -110,12 +110,15 @@ func (l *Loader) Report() LoadReport {
 	if !l.env.diagnostics {
 		return LoadReport{State: LoadDisabled}
 	}
+
 	if l.state == loading {
 		return LoadReport{State: LoadInProgress}
 	}
+
 	if l.report.State == "" {
 		return LoadReport{State: LoadNotStarted}
 	}
+
 	return cloneLoadReport(l.report)
 }
 
@@ -161,6 +164,7 @@ func makeLoadReport(registrations []*registration) *LoadReport {
 		State:   LoadInProgress,
 		Configs: make([]ConfigReport, len(registrations)),
 	}
+
 	for i, registration := range registrations {
 		configReport := ConfigReport{
 			InstanceName: registration.name,
@@ -168,6 +172,7 @@ func makeLoadReport(registrations []*registration) *LoadReport {
 			Prefix:       registration.prefix,
 			Status:       ConfigNotProcessed,
 		}
+
 		if registration.err != nil {
 			configReport.Status = ConfigFailed
 		}

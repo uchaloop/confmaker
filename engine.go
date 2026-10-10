@@ -40,30 +40,47 @@ func WithEngine(engine Engine) LoaderOption {
 		s.engine = engine
 	})
 }
+
 func nilEngineValue(engine Engine) bool {
 	if engine == nil {
 		return true
 	}
+
 	v := reflect.ValueOf(engine)
 	switch v.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return v.IsNil()
 	}
+
 	return false
 }
+
 func makeEngineDescriptor[T any](name string, opts []ConfigOption) (descriptor, error) {
-	d := descriptor{instanceName: name, defaults: func() any { cfg := new(T); setDefaults(cfg); return cfg }}
+	d := descriptor{
+		instanceName: name,
+		defaults: func() any {
+			cfg := new(T)
+			setDefaults(cfg)
+
+			return cfg
+		},
+	}
+
 	if name == "" {
 		return d, makeConfigError(ErrorDeclaration, "", "", errors.New("an instance name is required"))
 	}
+
 	if reflect.TypeFor[T]().Kind() != reflect.Struct {
 		return d, makeConfigError(ErrorDeclaration, "", "", errors.New("configuration must be a struct"))
 	}
+
 	if len(opts) != 0 {
 		return d, makeConfigError(ErrorDeclaration, "", "", errors.New("configuration options require the built-in engine"))
 	}
+
 	return d, nil
 }
+
 func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *LoadReport) error {
 	var errs []error
 	if report != nil {
@@ -73,31 +90,39 @@ func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *L
 			}
 		}()
 	}
+
 	if l.envErr != nil {
 		errs = append(errs, l.envErr)
 	}
+
 	if l.env.engineErr != nil {
 		errs = append(errs, l.env.engineErr)
 	}
+
 	if l.env.builtinOptions {
 		errs = append(errs, errors.New("ENV options require the built-in engine"))
 	}
+
 	for _, r := range regs {
 		if r.err != nil {
 			errs = append(errs, wrapConfigError(r.name, r.err))
 		}
 	}
+
 	if err := checkIdentityConflicts(regs); err != nil {
 		errs = append(errs, err)
 	}
+
 	if len(errs) != 0 {
 		return errors.Join(errs...)
 	}
+
 	configs := make([]any, len(regs))
 	for i, r := range regs {
 		if ctx.Err() != nil {
 			return errors.Join(append(errs, ctx.Err())...)
 		}
+
 		if report != nil {
 			report.Configs[i].Status = ConfigInterrupted
 		}
@@ -105,17 +130,21 @@ func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *L
 		if ctx.Err() != nil {
 			return errors.Join(append(errs, ctx.Err())...)
 		}
+
 		if report != nil {
 			report.Configs[i].Status = ConfigNotProcessed
 		}
 	}
+
 	for i, r := range regs {
 		if ctx.Err() != nil {
 			return errors.Join(append(errs, ctx.Err())...)
 		}
+
 		if report != nil {
 			report.Configs[i].Status = ConfigInterrupted
 		}
+
 		err := r.fillEngine(ctx, l.env.engine, configs[i])
 		if report != nil && (err == nil || ctx.Err() == nil || !errors.Is(err, ctx.Err())) {
 			report.Configs[i].Status = ConfigSucceeded
@@ -123,10 +152,12 @@ func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *L
 				report.Configs[i].Status = ConfigFailed
 			}
 		}
+
 		if err != nil {
 			errs = append(errs, err)
 		}
 	}
+
 	return errors.Join(errs...)
 }
 
@@ -141,5 +172,6 @@ func checkIdentityConflicts(regs []*registration) error {
 		}
 		seen[r.name] = true
 	}
+
 	return errors.Join(errs...)
 }

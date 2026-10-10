@@ -1,155 +1,128 @@
 # confmaker
 
-Explicit, centralized configuration for Go applications with a built-in ENV engine. Packages declare typed
-configuration; the application registers instances, loads the whole set once and
-passes checked values to consumers. Go 1.27.0 or later is required.
+<p align="center"><img src="logo.png" alt="confmaker" width="240"></p>
 
-This README describes the v2 API on the current branch. For an installed release,
-use its tagged documentation.
+[![Go Reference](https://pkg.go.dev/badge/github.com/uchaloop/confmaker/v2.svg)](https://pkg.go.dev/github.com/uchaloop/confmaker/v2) [![CI](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml/badge.svg)](https://github.com/uchaloop/confmaker/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/uchaloop/confmaker/branch/main/graph/badge.svg)](https://app.codecov.io/gh/uchaloop/confmaker) [![Release](https://img.shields.io/github/v/tag/uchaloop/confmaker?label=release)](https://github.com/uchaloop/confmaker/tags) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Custom engines
+**Explicit, centralized configuration for Go applications.** Packages declare
+configuration types; the application loads and validates them before use.
+Use the built-in ENV engine or supply your own backend while keeping the same
+Loader, handles and diagnostics. Fx wiring is provided separately by
+[confx](https://github.com/uchaloop/confx).
 
-Without options, confmaker uses its built-in ENV engine and the rules below.
-`WithEngine(engine)` selects a backend for every registration. It implements:
+The core module has no external dependencies, including its unit tests.
+This README describes v2; use the documentation for your installed version.
 
-```go
-type Engine interface {
-    Load(context.Context, LoadRequest) error
-}
-type LoadRequest struct {
-    Name string
-    Target any
-}
+[Install](#installation) · [Quick start](#quick-start) · [Lifecycle](#how-it-works) · [ENV](#built-in-env-engine) · [Engines](#custom-engines) · [Diagnostics](#errors-and-diagnostics) · [Manifest](#manifest-and-exports) · [Reference](#reference)
+
+## Installation
+
+Requires Go **1.27.0** or later.
+
+```sh
+go get github.com/uchaloop/confmaker/v2
 ```
 
-`Target` is a non-nil pointer to a fresh configuration struct. Root `SetDefaults`
-runs before the backend and root `Validate` after successful filling. The backend
-owns tags, supported field types, sources and overwrite rules; its defaults may
-replace the initial values. It must not retain Target or modify it after returning.
-Names may be any nonempty unique strings with a custom engine. The built-in engine
-retains the stricter name rules below.
-
-`EngineFunc` wraps a function. This complete application example uses env/v11;
-install that dependency in the application, not in confmaker:
+## Quick start
 
 ```go
 package main
 
 import (
-    "context"
-    "fmt"
-    "log"
-    "maps"
+	"fmt"
+	"log"
+	"time"
 
-    env "github.com/caarlos0/env/v11"
-    "github.com/uchaloop/confmaker/v2"
-)
-
-func main() {
-    // Snapshot at construction; map registration names to prefixes explicitly.
-    snapshot := map[string]string{"APP_PORT": "8080"}
-    prefixes := map[string]string{"server": "APP_"}
-    engine := confmaker.EngineFunc(func(ctx context.Context, req confmaker.LoadRequest) error {
-        if err := ctx.Err(); err != nil { return err }
-        prefix, ok := prefixes[req.Name]
-        if !ok { return fmt.Errorf("unknown registration %q", req.Name) }
-        return env.ParseWithOptions(req.Target, env.Options{
-            Environment: maps.Clone(snapshot), Prefix: prefix,
-        })
-    })
-    type Config struct { Port int `env:"PORT,required"` }
-    cfg, err := confmaker.Load[Config]("server", confmaker.WithEngine(engine))
-    if err != nil { log.Fatal(err) }
-    fmt.Println(cfg.Port)
-}
-```
-
-This example adopts env/v11 semantics; it does not interrupt a running parser or
-sanitize its errors. Errors from any backend may contain sensitive input. Report
-never includes error text, but returning or logging the original error is the
-backend/application's responsibility. No external engine dependency is included
-in confmaker.
-
-The engine receives sequential calls within one Loader. Sharing it across loaders
-requires safe concurrent use. The caller owns resources; Loader does not close
-them. A consistent source snapshot is the backend's responsibility. The built-in
-engine still takes one ENV snapshot per load.
-
-`LoaderOption` configures a loader; it replaces `EnvOption` in this development
-version. `WithEngine`, `WithDiagnostics` and `WithDiagnosticHandler` are general
-options. `WithEnv`, `AllowUnknown` and registration-level `WithPrefix` require the
-built-in engine: mixing them with a custom engine is an error, regardless of order.
-Nil (including typed nil) or repeated `WithEngine` is an error.
-
-## Loading
-
-```go
-package main
-
-import (
-    "fmt"
-    "log"
-    "time"
-
-    "github.com/uchaloop/confmaker/v2"
+	"github.com/uchaloop/confmaker/v2"
 )
 
 type StoreConfig struct {
-    Host string `env:"HOST,notEmpty"`
-    Timeout time.Duration `env:"TIMEOUT"`
+	Host    string        `env:"HOST,notEmpty"`
+	Timeout time.Duration `env:"TIMEOUT"`
 }
-func (c *StoreConfig) SetDefaults() { c.Timeout = 30 * time.Second }
+
+func (c *StoreConfig) SetDefaults() {
+	c.Timeout = 30 * time.Second
+}
+
 func (c StoreConfig) Validate() error {
-    if c.Timeout <= 0 { return fmt.Errorf("timeout must be positive") }
-    return nil
+	if c.Timeout <= 0 {
+		return fmt.Errorf("timeout must be positive")
+	}
+
+	return nil
 }
 
 func main() {
-    if err := run(); err != nil { log.Fatal(err) }
-}
+	cfg, err := confmaker.Load[StoreConfig]("store")
+	if err != nil {
+		log.Fatal(err)
+	}
 
-func run() error {
-    loader := confmaker.MakeLoader()
-    store := loader.Register[StoreConfig]("postgres")
-    if err := loader.Load(); err != nil { return err }
-    cfg, err := store.Value()
-    if err != nil { return err }
-    fmt.Println(cfg.Host, cfg.Timeout)
-    return nil
+	fmt.Println(cfg.Host, cfg.Timeout)
 }
 ```
 
-Set `POSTGRES_HOST` before running the example. For one config use
-`confmaker.Load[StoreConfig]("postgres")`. Config types need no confmaker import.
-`WithEnv(map[string]string{...})` replaces the entire process ENV and copies the
-map. A nil map means empty ENV. No files or external stores are read.
+Run with `STORE_HOST=db:5432 go run .`. The result is `db:5432 30s`.
+Configuration types need no confmaker import; defaults and validation are ordinary
+Go methods. Only methods on the root configuration run automatically.
 
-With the built-in engine, instance names contain lowercase letters, digits, `_`, `-`, `.` and start/end
-with a letter or digit. `read-replica` produces `READ_REPLICA_`.
-`WithPrefix("READ_DB_")` overrides the prefix, not identity. Names, prefixes and
-full variable names must not collide. Prefix overrides contain uppercase letters,
-digits or underscores and end in `_`.
+## How it works
 
-Register everything before Load. Load checks every registration, including unused
-ones, and takes one ENV snapshot. Conflicts stop processing before defaults;
-other errors are aggregated. Values become available only if the whole set succeeds.
-Repeat Load returns the same result; concurrent callers wait for its publication.
-Value does not load. A late registration returns a rejected handle.
-Name and BelongsTo expose identity and ownership without loading.
+For one configuration, use `Load[T]`. For several, create a `MakeLoader()`,
+register every configuration, call `Load()`, then read each handle's `Value()`.
 
-Returned structs share nested maps, slices and pointers: treat them as read-only.
-Loader is safe for concurrent use. User defaults, parsers and validators must not
-recursively call the same loader's Load.
+1. Check declarations and conflicts.
+2. Create fresh configurations and call root `SetDefaults()` methods.
+3. Fill configurations using the selected engine.
+4. Run root `Validate()` after successful parsing of that configuration.
+5. Publish values only if the whole set succeeds.
 
-`LoadContext(ctx)` adds cooperative cancellation; `Load()` uses Background.
-The initiating context controls the one-shot load. Cancellation after starting
-is final, while cancellation before starting leaves the Loader usable. A waiting
-call can cancel its own wait without cancelling the owner. An already published
-result takes precedence over cancellation. User methods run synchronously and
-cannot be forcibly interrupted. `LoadContext[T](ctx, name, opts...)` is the
-single-configuration equivalent. Contexts must not be nil.
+Loading is one-shot: subsequent calls return the same result. `Value()` never
+starts loading. A registration made after loading starts is rejected.
 
-## Built-in field rules
+The built-in engine takes one ENV snapshot for the load. Missing variables retain
+defaults; present values replace entire fields, including collections.
+`LoadContext` supports cooperative cancellation; see [Loader.LoadContext] for
+ownership and waiting rules. Configuration maps, slices and pointers are shared:
+treat loaded configurations as read-only.
+
+## Names and instances
+
+Register the same type under distinct names:
+
+```go
+loader := confmaker.MakeLoader()
+
+primary := loader.Register[StoreConfig]("primary")
+replica := loader.Register[StoreConfig]("replica", confmaker.WithPrefix("READ_DB_"))
+
+if err := loader.Load(); err != nil {
+	return err
+}
+
+primaryConfig, err := primary.Value()
+if err != nil {
+	return err
+}
+
+replicaConfig, err := replica.Value()
+if err != nil {
+	return err
+}
+
+fmt.Println(primaryConfig.Host, replicaConfig.Host)
+```
+
+This fragment reuses `StoreConfig` from the quick start and runs inside a function
+returning an error. It reads `PRIMARY_HOST` and `READ_DB_HOST`.
+With the built-in engine, names use lowercase letters, digits, `_`, `-` and `.`,
+and start/end with a letter or digit. `read-replica` produces `READ_REPLICA_`.
+`WithPrefix` changes the prefix, not registration identity. Names, prefixes and
+full variable names must not conflict. `Handle.Name` and `Handle.BelongsTo`
+inspect identity without loading.
+
+## Built-in ENV engine
 
 | Declaration | Meaning |
 | --- | --- |
@@ -189,106 +162,236 @@ Unknown variables under registered prefixes are errors; unrelated ENV is ignored
 AllowUnknown exempts specified prefixes. Required/notEmpty concern the supplied
 text, not the final Go value.
 
+## Custom engines
+
+Without options, confmaker uses the [built-in ENV engine](#built-in-env-engine).
+`WithEngine(engine)` selects a backend for every registration. It implements:
+
+```go
+type Engine interface {
+	Load(context.Context, LoadRequest) error
+}
+
+type LoadRequest struct {
+	Name   string
+	Target any
+}
+```
+
+`Target` is a non-nil pointer to a fresh configuration struct. Root `SetDefaults`
+runs before the backend and root `Validate` after successful filling. The backend
+owns tags, supported field types, sources and overwrite rules; its defaults may
+replace the initial values. It must not retain Target or modify it after returning.
+Names may be any nonempty unique strings with a custom engine. The built-in engine
+retains the stricter [name rules](#names-and-instances).
+
+`EngineFunc` wraps a function. This complete application example uses env/v11;
+install that dependency in the application, not in confmaker:
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"maps"
+
+	env "github.com/caarlos0/env/v11"
+	"github.com/uchaloop/confmaker/v2"
+)
+
+func makeEnvEngine(vars, prefixes map[string]string) confmaker.Engine {
+	snapshot := maps.Clone(vars)
+	names := maps.Clone(prefixes)
+
+	return confmaker.EngineFunc(func(ctx context.Context, req confmaker.LoadRequest) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		prefix, ok := names[req.Name]
+		if !ok {
+			return fmt.Errorf("unknown registration %q", req.Name)
+		}
+
+		return env.ParseWithOptions(req.Target, env.Options{
+			Environment: maps.Clone(snapshot),
+			Prefix:      prefix,
+		})
+	})
+}
+
+func main() {
+	engine := makeEnvEngine(
+		map[string]string{"APP_PORT": "8080"},
+		map[string]string{"server": "APP_"},
+	)
+
+	cfg, err := confmaker.Load[struct {
+		Port int `env:"PORT,required"`
+	}]("server", confmaker.WithEngine(engine))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(cfg.Port)
+}
+```
+
+This example adopts env/v11 semantics; it does not interrupt a running parser or
+sanitize its errors. Errors from any backend may contain sensitive input. Report
+never includes error text, but returning or logging the original error is the
+backend/application's responsibility. No external engine dependency is included
+in confmaker.
+
+The engine receives sequential calls within one Loader. Sharing it across loaders
+requires safe concurrent use. The caller owns resources; Loader does not close
+them. A consistent source snapshot is the backend's responsibility. The built-in
+engine still takes one ENV snapshot per load.
+
+`LoaderOption` configures a loader. `WithEngine`, `WithDiagnostics` and `WithDiagnosticHandler` are general
+options. `WithEnv`, `AllowUnknown` and registration-level `WithPrefix` require the
+built-in engine: mixing them with a custom engine is an error, regardless of order.
+Nil (including typed nil) or repeated `WithEngine` is an error.
+
 ## Errors and diagnostics
 
-Load returns joined errors. ConfigErrors extracts structured ErrorKind,
-InstanceName, VariableName and FieldPath. Handle the original error too:
-lifecycle and writer errors need not be ConfigError. Ordinary causes are preserved
-for errors.Is/As. Sensitive parse causes and inputs are discarded.
+`Load` aggregates problems. `ConfigErrors(err)` extracts structured kinds and
+configuration/field names; also handle the original error, since not every error
+is a `ConfigError`. Ordinary causes support `errors.Is` and `errors.As`.
+Sensitive parse causes are discarded.
 
 ```go
 loader := confmaker.MakeLoader(confmaker.WithDiagnostics())
-// Register configurations, then:
+loader.Register[StoreConfig]("store")
+
 err := loader.Load()
-report := loader.Report() // Also available on error.
+report := loader.Report() // Available even when loading fails.
 ```
 
-Final reports have `DetailLevel`: `DetailConfig` (`config`) for custom engines,
-with registration names, types and outcomes; `DetailField` (`field`) for the
-built-in engine, with variable details. Unavailable field details and ENV prefixes
-are not inferred. Reports without details have an empty DetailLevel.
+Reports contain no values, defaults, error messages or panic payloads. The built-in
+engine provides field-level detail; custom engines provide configuration outcomes.
+Report snapshots are independent. See [Loader.Report] for states and [LoadReport]
+for fields. A successful field does not imply that the entire configuration passed.
 
-Report is an independent, value-free snapshot. It includes no defaults, error
-messages, causes or panic values. States are disabled, not_started, in_progress,
-succeeded, failed and panicked. Disabled/not_started/in_progress have no details.
-Field success means parsing succeeded, not that validation or the whole set passed.
-After panic, completed work stays visible, interrupted work is marked interrupted,
-and untouched work remains not_processed. Default/zero sources distinguish a
-nonzero value after defaults from a zero value, not explicit assignments.
-
-WithDiagnosticHandler(func(LoadReport)) also enables collection. It runs once on
-normal success or failure, after the result and report are published. It can read
-handles, Report and call Load again. The executing Load waits for the handler;
-other waiting callers may return earlier. Loading panic skips the handler,
-propagates to the executing caller and makes later Load return ErrLoadPanicked.
-Handler panic propagates but does not change the published load result.
+`WithDiagnosticHandler` enables collection and invokes a callback after the result
+is published, on success or ordinary failure. Loading panic skips the callback,
+propagates to the caller and leaves later load calls returning `ErrLoadPanicked`.
+See [WithDiagnosticHandler] for callback and concurrency guarantees.
 
 ## Manifest and exports
 
-Manifest is currently available only for the built-in engine. With a custom
-engine, `Loader.Manifest` returns `ErrManifestUnsupported` and a zero result,
-without calling user methods. `Manifest[T]` always describes the built-in schema.
-Exporters still accept any prepared `ManifestResult`.
+`Manifest` describes the built-in schema without loading ENV. Add
+`IncludeDefaults()` to evaluate fresh defaults explicitly. It never uses loaded
+values. Custom engines return `ErrManifestUnsupported`.
 
+### Prepare once, export in several formats
 
 ```go
-// Omit IncludeDefaults for schema only, without user methods or ENV reads.
 document, err := loader.Manifest(confmaker.IncludeDefaults())
-if err != nil { return err }
-if err := confexport.WriteMarkdown(writer, document); err != nil { return err }
+if err != nil {
+	return err
+}
+
+if err := confexport.WriteMarkdown(writer, document); err != nil {
+	return err
+}
 ```
 
-Import `github.com/uchaloop/confmaker/v2/confexport` for WriteJSON,
-WriteMarkdown and WriteEnvExample. Exporters consume a prepared ManifestResult,
-never a loader. Reuse the same snapshot for multiple formats. JSON format version 2
-preserves default states and structured render problems. Writer errors may leave
-partial output. File handling belongs to the caller.
+Import `github.com/uchaloop/confmaker/v2/confexport`. Its `WriteJSON`,
+`WriteMarkdown` and `WriteEnvExample` functions accept a prepared manifest and
+never load configuration or run user methods. The caller owns the writer and files.
+Writer errors may leave partial output.
 
-ManifestResult contains Configs and Problems. Schema/declaration conflicts return
-an error with no result. IncludeDefaults evaluates fresh instances once per config;
-render failure marks that field unrenderable and appends a structural problem
-without removing the schema. Inspect Problems if all defaults must render.
-No error messages or causes are included in these problems.
+Schema errors return no manifest. Default-render failures stay in
+`document.Problems`; inspect them when every default must render. Sensitive fields
+are always redacted and are never marshaled. See [DefaultInfo] for default states
+and [ManifestResult] for the result contract.
 
-Default states are not_evaluated, zero, rendered, redacted and unrenderable.
-Only rendered has meaningful Text, which may be empty. Zero cannot distinguish an
-explicit default from no assignment. Sensitive fields are always redacted and
-never marshaled. A custom parser needs MarshalText only to render nonzero defaults.
-Panic from defaults/marshalers propagates without changing Load or its diagnostics.
+### Optional application flag
 
-Manifest[T](name, options...) returns the same model with one configuration.
-Manifest snapshots are independent and can run before or after loading. Concurrent
-IncludeDefaults/Load calls require user methods to support concurrent invocation.
+Import `github.com/uchaloop/confmaker/v2/confcli` to add
+`-describe=env|markdown|json` to your application:
 
-The optional `confcli.MakeDescribeFlag` handles `-describe=env|markdown|json`.
-After parsing and checking Requested, build the manifest explicitly, then call
-`describe.Write(writer, document)`. It never loads or terminates the application.
+```go
+describe := confcli.MakeDescribeFlag(flags)
+if err := flags.Parse(args); err != nil {
+	return err
+}
+
+if describe.Requested() {
+	document, err := loader.Manifest(confmaker.IncludeDefaults())
+	if err != nil {
+		return err
+	}
+
+	return describe.Write(writer, document)
+}
+
+return loader.Load()
+```
+
+Register configurations before this fragment. `flags` is your `*flag.FlagSet`,
+`args` contains command-line arguments, and `writer` is an `io.Writer`.
+`confcli` is a helper package, not a standalone executable. It does not parse
+arguments automatically, load ENV, manage files or exit the process.
 
 ## Sensitive fields
 
 Use the secret tag or a type implementing `interface { IsSensitive() }`. The marker
 is inspected, never called; value and pointer receivers are recognized. Sensitive
 collection elements or keys make the whole field sensitive. No opt-out exists.
-The core does not import secret/v2. The companion secret.Secret needs the new
-IsSensitive marker; older versions require explicit secret tags.
+The core does not depend on secret. `secret.Secret` implements the marker from
+`secret/v2 v2.2.0`; older versions require explicit secret tags.
 
 Tags only protect confmaker operations, not a returned ordinary string. Dedicated
 secret types protect later formatting separately. Validate errors remain the
 application's responsibility and must not contain secrets.
 
-## Fx and development
+## Testing
 
-[confx](https://github.com/uchaloop/confx) owns Fx wiring, not parsing or validation.
-Use its matching v2-compatible development version; earlier releases use v1 types.
+Use `WithEnv` for isolated tests. It copies a complete replacement environment;
+`WithEnv(nil)` means an empty environment, not a fallback to process ENV.
 
-Run `go build ./...`, `go test -race ./...` and `go vet ./...`. A local Go
-workspace can connect confmaker, confx and secret during development. Do not commit
-workspace files or local module replacements. Before releasing, verify each module
-with `GOWORK=off` against published dependencies. Production dependency checks use
-`go list -deps .`.
+```go
+cfg, err := confmaker.Load[struct {
+	Port int `env:"PORT,required"`
+}]("server", confmaker.WithEnv(map[string]string{
+	"SERVER_PORT": "8080",
+}))
+if err != nil {
+	t.Fatal(err)
+}
 
-## Integration tests
+if cfg.Port != 8080 {
+	t.Fatalf("port = %d, want 8080", cfg.Port)
+}
+```
 
-The core module has no external dependencies, including test dependencies.
-Compatibility with `secret/v2` is tested in the separate `integration/secret` module.
-See [its README](integration/secret/README.md) for local and standalone commands.
+Core checks run independently of a workspace:
+
+```sh
+GOWORK=off go test -race ./...
+GOWORK=off go vet ./...
+```
+
+Compatibility with the real secret package is checked in a separate
+[integration module](integration/secret/README.md). The root test pattern does not
+include nested modules. See [CONTRIBUTING.md](CONTRIBUTING.md) for development rules.
+
+## Reference
+
+- [Core API and runnable examples](https://pkg.go.dev/github.com/uchaloop/confmaker/v2)
+- [Manifest exporters](https://pkg.go.dev/github.com/uchaloop/confmaker/v2/confexport)
+- [Application describe flag](https://pkg.go.dev/github.com/uchaloop/confmaker/v2/confcli)
+- [Fx adapter](https://github.com/uchaloop/confx): use confx v0.5.0 or later for this API
+- [Changelog](CHANGELOG.md), [contributing](CONTRIBUTING.md), [security policy](SECURITY.md)
+- [MIT license](LICENSE)
+
+[Loader.LoadContext]: https://pkg.go.dev/github.com/uchaloop/confmaker/v2#Loader.LoadContext
+[Loader.Report]: https://pkg.go.dev/github.com/uchaloop/confmaker/v2#Loader.Report
+[LoadReport]: https://pkg.go.dev/github.com/uchaloop/confmaker/v2#LoadReport
+[WithDiagnosticHandler]: https://pkg.go.dev/github.com/uchaloop/confmaker/v2#WithDiagnosticHandler
+[DefaultInfo]: https://pkg.go.dev/github.com/uchaloop/confmaker/v2#DefaultInfo
+[ManifestResult]: https://pkg.go.dev/github.com/uchaloop/confmaker/v2#ManifestResult

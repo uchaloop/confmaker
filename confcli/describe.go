@@ -3,9 +3,10 @@ package confcli
 import (
 	"flag"
 	"fmt"
+	"io"
+
 	c "github.com/uchaloop/confmaker/v2"
 	"github.com/uchaloop/confmaker/v2/confexport"
-	"io"
 )
 
 // DescribeFlag selects an optional manifest export. Create it with

@@ -3,16 +3,10 @@ package confexport
 import (
 	"encoding/json/jsontext"
 	json "encoding/json/v2"
-	c "github.com/uchaloop/confmaker/v2"
 	"io"
-)
 
-// manifestJSON is a versioned wire format independent of Go metadata fields.
-type manifestJSON struct {
-	Version  int                  `json:"version"`
-	Configs  []configManifestJSON `json:"configs"`
-	Problems []problemJSON        `json:"problems"`
-}
+	c "github.com/uchaloop/confmaker/v2"
+)
 
 type configManifestJSON struct {
 	InstanceName string         `json:"instanceName"`
@@ -38,8 +32,16 @@ type variableJSON struct {
 // states and render problems without running user methods. Encoding failures
 // leave the writer untouched; writer errors may leave partial output.
 func WriteJSON(writer io.Writer, configs c.ManifestResult) error {
+	// Keep the one-use document envelope local to its writer.
+	document := struct {
+		Version  int                  `json:"version"`
+		Configs  []configManifestJSON `json:"configs"`
+		Problems []problemJSON        `json:"problems"`
+	}{
+		Version: 2,
+		Configs: make([]configManifestJSON, 0, len(configs.Configs)),
+	}
 
-	document := manifestJSON{Version: 2, Configs: make([]configManifestJSON, 0, len(configs.Configs))}
 	for _, config := range configs.Configs {
 		entry := configManifestJSON{
 			InstanceName: config.InstanceName, Prefix: config.Prefix,
@@ -52,6 +54,7 @@ func WriteJSON(writer io.Writer, configs c.ManifestResult) error {
 				Required: variable.Required, NotEmpty: variable.NotEmpty, Secret: variable.Secret,
 				Default: defaultJSON{State: variable.Default.State}, FieldPath: variable.FieldPath, Format: variable.Format, Separator: variable.Separator, KeyValSeparator: variable.KeyValSeparator,
 			}
+
 			if !variable.Secret && variable.Default.State == c.DefaultRendered {
 				field.Default.Text = &variable.Default.Text
 			}
@@ -65,6 +68,7 @@ func WriteJSON(writer io.Writer, configs c.ManifestResult) error {
 	for _, p := range configs.Problems {
 		document.Problems = append(document.Problems, problemJSON{p.Kind, p.InstanceName, p.VariableName, p.FieldPath})
 	}
+
 	data, err := json.Marshal(document, jsontext.WithIndent("  "))
 	if err != nil {
 		return err
@@ -87,6 +91,7 @@ type defaultJSON struct {
 	State c.DefaultState `json:"state"`
 	Text  *string        `json:"text,omitzero"`
 }
+
 type problemJSON struct {
 	Kind         c.ErrorKind `json:"kind"`
 	InstanceName string      `json:"instanceName"`

@@ -14,7 +14,9 @@ type StoreConfig struct {
 	Timeout time.Duration `env:"TIMEOUT"`
 }
 
-func (c *StoreConfig) SetDefaults() { c.Timeout = 30 * time.Second }
+func (c *StoreConfig) SetDefaults() {
+	c.Timeout = 30 * time.Second
+}
 
 func (c StoreConfig) Validate() error {
 	if c.Timeout <= 0 {
@@ -75,8 +77,20 @@ func ExampleLoader() {
 		return
 	}
 
-	primaryCfg, _ := primary.Value()
-	replicaCfg, _ := replica.Value()
+	primaryCfg, err := primary.Value()
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	replicaCfg, err := replica.Value()
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
 	fmt.Println(primaryCfg.Host, replicaCfg.Host)
 
 	// Output:
@@ -154,4 +168,27 @@ func ExampleLoader_Manifest() {
 	// store STORE_
 	// STORE_HOST=
 	// STORE_TIMEOUT=30s
+}
+
+func ExampleLoader_Report() {
+	loader := confmaker.MakeLoader(
+		confmaker.WithDiagnostics(),
+		confmaker.WithEnv(map[string]string{"STORE_HOST": "db:5432"}),
+	)
+	loader.Register[StoreConfig]("store")
+
+	fmt.Println(loader.Report().State)
+
+	if err := loader.Load(); err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	report := loader.Report()
+	fmt.Println(report.State, report.DetailLevel)
+
+	// Output:
+	// not_started
+	// succeeded field
 }

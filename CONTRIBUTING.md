@@ -127,6 +127,9 @@ available after a successful upload for `main`.
   results only where the function's contract requires them.
 - Separate logical steps with blank lines, keeping a call and its error check
   together. Use `len(value)` for string emptiness checks.
+- Use anonymous structs for one-use internal data shapes; retain named types when
+  they are reused, carry methods, or form a public contract. Apply the same code
+  style to README and GoDoc examples.
 - Write GoDoc for callers: describe behavior, guarantees and relevant limits.
   Internal comments should explain non-obvious reasons rather than restate code.
 

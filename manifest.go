@@ -42,6 +42,7 @@ type ManifestOption interface {
 	DescribeOption
 	applyManifest(*manifestSettings)
 }
+
 type manifestSettings struct{ defaults bool }
 type manifestOption func(*manifestSettings)
 
@@ -86,12 +87,15 @@ func (l *Loader) Manifest(opts ...ManifestOption) (ManifestResult, error) {
 			descriptors = append(descriptors, r.descriptor)
 		}
 	}
+
 	if _, err := checkRegistrations(descriptors); err != nil {
 		errs = append(errs, err)
 	}
+
 	if err := errors.Join(errs...); err != nil {
 		return ManifestResult{}, err
 	}
+
 	result := ManifestResult{Configs: make([]ConfigManifest, 0, len(descriptors))}
 	for _, d := range descriptors {
 		config := ConfigManifest{InstanceName: d.instanceName, Prefix: d.prefix, Variables: make([]Variable, 0, len(d.fields))}
@@ -102,11 +106,13 @@ func (l *Loader) Manifest(opts ...ManifestOption) (ManifestResult, error) {
 			}
 			config.Variables = append(config.Variables, Variable{Name: f.Name, FieldPath: f.field, Description: f.Description, Type: f.Type, Required: f.Required, NotEmpty: f.NotEmpty, Secret: f.Secret, Format: f.format, Separator: f.separator, KeyValSeparator: f.keyValSeparator, Default: DefaultInfo{State: state}})
 		}
+
 		if settings.defaults {
 			result.Problems = append(result.Problems, evaluateDefaults(d, config.Variables)...)
 		}
 		result.Configs = append(result.Configs, config)
 	}
+
 	return result, nil
 }
 
@@ -126,6 +132,7 @@ func Manifest[T any](name string, opts ...DescribeOption) (ManifestResult, error
 			return ManifestResult{}, makeConfigError(ErrorDeclaration, "", "", errors.New("nil description option"))
 		}
 	}
+
 	l := MakeLoader()
 	l.Register[T](name, configs...)
 	return l.Manifest(manifests...)

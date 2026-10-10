@@ -17,6 +17,7 @@ func sensitiveType(t reflect.Type, seen map[reflect.Type]bool) bool {
 	if t.Implements(secretValueType) || reflect.PointerTo(t).Implements(secretValueType) {
 		return true
 	}
+
 	if declaresTextForm(t) {
 		return false
 	}
@@ -26,5 +27,6 @@ func sensitiveType(t reflect.Type, seen map[reflect.Type]bool) bool {
 	case reflect.Map:
 		return sensitiveType(t.Key(), seen) || sensitiveType(t.Elem(), seen)
 	}
+
 	return false
 }
