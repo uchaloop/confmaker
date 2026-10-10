@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 // benchPool and benchConfig are the shape of a real infrastructure config: a

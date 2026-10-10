@@ -81,7 +81,7 @@ func TestWriteManifestMarkdown(t *testing.T) {
 
 	for _, text := range []string{
 		"## app\n", "Prefix: `APP_`", "Required, non-empty", "API address<br>Use the staging endpoint",
-		"| `APP_TOKEN` | `secret.Secret` | Required | Yes | — |",
+		"| `APP_TOKEN` | `testsecret.Secret` | Required | Yes | — |",
 		"| `APP_COUNT` | `int` | Optional | No | — |",
 	} {
 		if !strings.Contains(output.String(), text) {

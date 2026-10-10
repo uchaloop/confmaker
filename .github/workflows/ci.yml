@@ -67,3 +67,24 @@ jobs:
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+
+  secret-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOWORK: "off"
+    defaults:
+      run:
+        working-directory: integration/secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: false
+      - name: Resolve integration dependencies
+        run: go mod tidy
+      - name: Vet integration
+        run: go vet ./...
+      - name: Test integration
+        run: go test -race ./...

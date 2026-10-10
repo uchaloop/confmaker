@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 type envExampleConfig struct {

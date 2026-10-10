@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 // strictConfig is the config the strict-check tests register.

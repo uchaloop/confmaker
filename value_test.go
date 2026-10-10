@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 func parseInto[T any](t *testing.T, raw string) (T, error) {

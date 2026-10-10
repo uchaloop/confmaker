@@ -286,3 +286,9 @@ workspace can connect confmaker, confx and secret during development. Do not com
 workspace files or local module replacements. Before releasing, verify each module
 with `GOWORK=off` against published dependencies. Production dependency checks use
 `go list -deps .`.
+
+## Integration tests
+
+The core module has no external dependencies, including test dependencies.
+Compatibility with `secret/v2` is tested in the separate `integration/secret` module.
+See [its README](integration/secret/README.md) for local and standalone commands.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 // widgetConfig is a stand-in for a library's typed config: an ordinary field, a

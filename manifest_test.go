@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 // manifestConfig covers what a generator has to render: a plain field, a nested

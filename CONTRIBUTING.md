@@ -186,3 +186,10 @@ Example before publication:
 
 [2.0.0]: https://github.com/uchaloop/confmaker/compare/v1.0.1...HEAD
 ```
+
+## Integration module
+
+Core tests must not import external secret packages. Use the internal test fixture
+for the structural sensitivity contract. Real secret compatibility tests live in
+`integration/secret`; see its README for commands. Its relative core replacement
+is intentional and must not be added to the root module.
