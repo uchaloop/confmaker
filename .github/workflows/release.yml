@@ -33,10 +33,10 @@ jobs:
 
       - name: Validate the module version tag
         run: |
-          # This module has no /vN suffix, so releases use major version 0 or 1.
+          # This module uses /v2, so release tags must use major version 2.
           number='(0|[1-9][0-9]*)'
           identifier="($number|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
-          pattern="^v(0|1)\.$number\.$number(-$identifier(\.$identifier)*)?$"
+          pattern="^v2\.$number\.$number(-$identifier(\.$identifier)*)?$"
           if [[ ! "$GITHUB_REF_NAME" =~ $pattern ]]; then
             echo "Invalid module version tag: $GITHUB_REF_NAME" >&2
             exit 1
@@ -87,7 +87,7 @@ jobs:
     steps:
       - name: Request the released version from the Go proxy
         env:
-          MODULE: github.com/uchaloop/confmaker
+          MODULE: github.com/uchaloop/confmaker/v2
         run: |
           curl --fail --show-error --silent \
             --retry 4 --retry-all-errors --retry-delay 5 --retry-max-time 180 \
