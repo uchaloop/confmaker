@@ -43,3 +43,31 @@ func ExampleMakeDescribeFlag() {
 	// # Required.
 	// # APP_HOST=
 }
+
+func ExampleDescribe() {
+	loader := confmaker.MakeLoader()
+	loader.Register[struct {
+		Host string `env:"HOST,required"`
+	}]("app")
+
+	described, err := confcli.Describe(
+		loader,
+		[]string{"-describe=env"},
+		os.Stdout,
+		confmaker.IncludeDefaults(),
+	)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+
+		return
+	}
+
+	if described {
+		return
+	}
+
+	// Output:
+	// # Configuration: "app"
+	// # Required.
+	// # APP_HOST=
+}

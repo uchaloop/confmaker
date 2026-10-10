@@ -4,6 +4,13 @@ All notable changes to this module are documented in this file.
 
 Entries are grouped by version and change type, with the newest version first.
 
+## [2.1.0] - Unreleased
+
+### Added
+
+- Added `confcli.Describe` and `ManifestSource` for description and help handling
+  with a private flag set, explicit manifest options and caller-owned process exit.
+
 ## [2.0.0]
 
 ### Added
@@ -446,3 +453,5 @@ its only dependencies.
 [0.3.0]: https://github.com/uchaloop/confmaker/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.1.0
+
+[2.1.0]: https://github.com/uchaloop/confmaker/compare/v2.0.0...HEAD
