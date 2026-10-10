@@ -1,29 +1,20 @@
-package confmaker
+package confexport
 
 import (
 	"fmt"
 	"io"
 	"strings"
+
+	c "github.com/uchaloop/confmaker/v2"
 )
 
-// WriteManifestMarkdown writes a section per config with its prefix and a
-// GitHub-flavored Markdown table of variables in manifest order. Columns show
-// ENV name, Go type, requirement, secret status, default and description.
-// Missing or secret defaults are shown as an em dash. Text is escaped for table
-// cells; description and default line breaks become HTML br elements.
-//
-// It uses Loader.Manifest's snapshot and lifecycle without reading ENV or
-// loading configs. Manifest errors leave writer untouched. Writer errors are
-// returned and may leave partial output. The caller owns file handling.
-func (l *Loader) WriteManifestMarkdown(writer io.Writer) error {
-	configs, err := l.Manifest()
-	if err != nil {
-		return err
-	}
-
+// WriteMarkdown writes a prepared manifest as escaped Markdown tables.
+// Unrenderable defaults are marked; no user methods or ENV reads occur.
+// Writer errors may leave partial output.
+func WriteMarkdown(writer io.Writer, configs c.ManifestResult) error {
 	var output strings.Builder
 	output.WriteString("# Configuration manifest\n")
-	for _, config := range configs {
+	for _, config := range configs.Configs {
 		fmt.Fprintf(&output, "\n## %s\n\nPrefix: %s\n\n", escapeManifestMarkdownText(config.InstanceName), manifestMarkdownCode(config.Prefix))
 		output.WriteString("| ENV | Type | Requirement | Secret | Default | Description |\n")
 		output.WriteString("| --- | --- | --- | --- | --- | --- |\n")
@@ -41,8 +32,11 @@ func (l *Loader) WriteManifestMarkdown(writer io.Writer) error {
 			}
 
 			defaultText := "—"
-			if !variable.Secret && variable.HasDefault {
-				defaultText = escapeManifestMarkdownText(variable.Default)
+			if variable.Default.State == c.DefaultUnrenderable {
+				defaultText = "Cannot render"
+			}
+			if !variable.Secret && (variable.Default.State == c.DefaultRendered) {
+				defaultText = escapeManifestMarkdownText(variable.Default.Text)
 			}
 
 			fmt.Fprintf(&output, "| %s | %s | %s | %s | %s | %s |\n",

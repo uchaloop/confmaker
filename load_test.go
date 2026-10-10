@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 // widgetConfig is a stand-in for a library's typed config: an ordinary field, a
@@ -392,7 +392,7 @@ func TestRequiredIsAboutTheVariableNotTheValue(t *testing.T) {
 
 	// A default does not satisfy required: the deployment still has to supply it.
 	cfg := config{Host: "seeded"}
-	if err := applyAndValidate(&cfg, fields, "confxapp", nil, nil); err == nil {
+	if err := applyAndValidate(&cfg, fields, "confxapp", nil, nil, nil); err == nil {
 		t.Fatal("a seeded value satisfied required")
 	}
 }

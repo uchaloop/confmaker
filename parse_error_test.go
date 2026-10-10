@@ -60,7 +60,7 @@ func TestDurationParseErrorPreservesCause(t *testing.T) {
 
 func TestLoadPreservesCollectionParseCauses(t *testing.T) {
 	_, err := Load[struct {
-		Values []*int8          `env:"VALUES"`
+		Values []int8           `env:"VALUES"`
 		Limits map[string]uint8 `env:"LIMITS"`
 	}]("app", WithEnv(map[string]string{"APP_VALUES": "128", "APP_LIMITS": "max:bad"}))
 	problems := ConfigErrors(err)

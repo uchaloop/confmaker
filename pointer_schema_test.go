@@ -22,7 +22,7 @@ type nestedRequiredConfig struct {
 func checkPointerDeclaration[T any](t *testing.T) {
 	t.Helper()
 
-	variables, err := Manifest[T]("app")
+	variables, err := singleManifestForTest[T]("app")
 	problems := ConfigErrors(err)
 	if variables != nil || len(problems) == 0 || problems[0].Kind != ErrorDeclaration || problems[0].InstanceName != "app" {
 		t.Fatalf("expected declaration error, got %v, %v", variables, err)
@@ -51,9 +51,9 @@ func TestPointerSchemaRestrictions(t *testing.T) {
 
 func TestScalarPointersStillLoad(t *testing.T) {
 	cfg, err := Load[struct {
-		Timeout **time.Duration `env:"TIMEOUT"`
+		Timeout *time.Duration `env:"TIMEOUT"`
 	}]("app", WithEnv(map[string]string{"APP_TIMEOUT": "3s"}))
-	if err != nil || cfg.Timeout == nil || *cfg.Timeout == nil || **cfg.Timeout != 3*time.Second {
+	if err != nil || cfg.Timeout == nil || *cfg.Timeout != 3*time.Second {
 		t.Fatalf("scalar pointers: %+v, %v", cfg, err)
 	}
 }

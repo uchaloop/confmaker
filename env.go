@@ -38,11 +38,12 @@ func osEnvironment() environment {
 //
 // Without WithEnv, a load takes a snapshot of the process environment when it
 // starts.
-func WithEnv(vars map[string]string) EnvOption {
+func WithEnv(vars map[string]string) LoaderOption {
 	env := make(environment, len(vars))
 	maps.Copy(env, vars)
 
 	return envOption(func(s *envSettings) {
+		s.builtinOptions = true
 		s.envRepeated = s.env != nil
 		s.env = env
 	})

@@ -39,6 +39,7 @@ jobs:
         with:
           go-version: '1.27.x'
           check-latest: true
+          cache: false
 
       - name: Check formatting
         run: |
@@ -67,3 +68,48 @@ jobs:
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+
+  secret-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOWORK: "off"
+    defaults:
+      run:
+        working-directory: integration/secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: false
+      - name: Resolve integration dependencies
+        run: go mod tidy
+      - name: Vet integration
+        run: go vet ./...
+      - name: Test integration
+        run: go test -race ./...
+
+  engine-examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOWORK: "off"
+      GOTOOLCHAIN: local
+    defaults:
+      run:
+        working-directory: examples/engines
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: examples/engines/go.sum
+      - name: Check module dependencies
+        run: go mod tidy -diff
+      - name: Build examples
+        run: go build ./...
+      - name: Vet examples
+        run: go vet ./...
+      - name: Test examples
+        run: go test -race ./...

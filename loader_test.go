@@ -231,7 +231,7 @@ func waitForBlockedLoad(t *testing.T) {
 	for time.Now().Before(deadline) {
 		stacks := string(buf[:runtime.Stack(buf, true)])
 		for goroutine := range strings.SplitSeq(stacks, "\n\n") {
-			if strings.Contains(goroutine, "[chan receive") && strings.Contains(goroutine, "confmaker.(*Loader).Load(") {
+			if strings.Contains(goroutine, "[chan receive") && strings.Contains(goroutine, "confmaker/v2.(*Loader).Load(") {
 				return
 			}
 		}
@@ -341,15 +341,15 @@ func TestPanicDuringLoadFinishesTheLoad(t *testing.T) {
 			t.Error("the panic did not reach the Load that ran it")
 		}
 
-		if err := <-waiting; !errors.Is(err, errLoadPanicked) {
+		if err := <-waiting; !errors.Is(err, ErrLoadPanicked) {
 			t.Errorf("waiting Load: %v", err)
 		}
 
-		if err := loader.Load(); !errors.Is(err, errLoadPanicked) {
+		if err := loader.Load(); !errors.Is(err, ErrLoadPanicked) {
 			t.Errorf("Load after the panic: %v", err)
 		}
 
-		if _, err := handle.Value(); !errors.Is(err, errLoadPanicked) {
+		if _, err := handle.Value(); !errors.Is(err, ErrLoadPanicked) {
 			t.Errorf("Value after the panic: %v", err)
 		}
 	})

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 // TestBindRejectsACollision covers the mistake the rule exists for: a second
@@ -50,7 +50,7 @@ func TestSecretPublishesNoDefault(t *testing.T) {
 	variable := manifested[struct {
 		Password secret.Secret `env:"PASSWORD"`
 	}](t, "confxapp")[0]
-	if len(variable.Default) != 0 || variable.HasDefault {
+	if len(variable.Default.Text) != 0 || (variable.Default.State == DefaultRendered) {
 		t.Fatalf("a secret published a default: %+v", variable)
 	}
 
@@ -64,7 +64,7 @@ func TestManifestReportsAnInvalidDeclaration(t *testing.T) {
 		MaxConns int `env:"MAX_CONNS"`
 	}
 
-	variables, err := Manifest[struct {
+	variables, err := singleManifestForTest[struct {
 		Shards []pool
 	}]("confxapp")
 	if err == nil {
@@ -83,7 +83,7 @@ func TestInstanceNameIsChecked(t *testing.T) {
 
 	for _, name := range rejected {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Manifest[strictConfig](name); err == nil {
+			if _, err := singleManifestForTest[strictConfig](name); err == nil {
 				t.Errorf("Manifest accepted %q", name)
 			}
 
@@ -110,32 +110,24 @@ func TestUnreadableTypeIsRefusedWhenBound(t *testing.T) {
 
 	cases := map[string]func(*testing.T) error{
 		"a config in a slice": func(t *testing.T) error {
-			type config struct {
+			return bindError[struct {
 				Shards []shard `env:"SHARDS"`
-			}
-
-			return bindError[config](t)
+			}](t)
 		},
 		"a complex number": func(t *testing.T) error {
-			type config struct {
+			return bindError[struct {
 				Ratio complex128 `env:"RATIO"`
-			}
-
-			return bindError[config](t)
+			}](t)
 		},
 		"a byte slice": func(t *testing.T) error {
-			type config struct {
+			return bindError[struct {
 				Data []byte `env:"DATA"`
-			}
-
-			return bindError[config](t)
+			}](t)
 		},
 		"a map keyed by a struct": func(t *testing.T) error {
-			type config struct {
+			return bindError[struct {
 				Weights map[shard]int `env:"WEIGHTS"`
-			}
-
-			return bindError[config](t)
+			}](t)
 		},
 	}
 
@@ -207,11 +199,9 @@ func TestDeclarationErrorsNameTheFieldPath(t *testing.T) {
 			MaxConns int `env:"MAX_CONNS" envDefault:"2"`
 		}
 
-		type config struct {
+		if err := bindError[struct {
 			Pool inner `envPrefix:"POOL_"`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "field Pool.MaxConns") {
+		}](t); !strings.Contains(err.Error(), "field Pool.MaxConns") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -225,11 +215,9 @@ func TestDeclarationErrorsNameTheFieldPath(t *testing.T) {
 			Shards []shard
 		}
 
-		type config struct {
+		if err := bindError[struct {
 			Cluster inner `envPrefix:"CONFXCLUSTER_"`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "field Cluster.Shards") {
+		}](t); !strings.Contains(err.Error(), "field Cluster.Shards") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -239,11 +227,9 @@ func TestDeclarationErrorsNameTheFieldPath(t *testing.T) {
 			Ratio complex128 `env:"RATIO"`
 		}
 
-		type config struct {
+		if err := bindError[struct {
 			Nested inner `envPrefix:"NESTED_"`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "field Nested.Ratio") {
+		}](t); !strings.Contains(err.Error(), "field Nested.Ratio") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -270,50 +256,21 @@ func TestAnEmptyEnvTagIsNotConfiguration(t *testing.T) {
 	}
 }
 
-// TestASecretInACollectionIsRefused covers the shape that would read a list of
-// secrets out of one variable. It splits on a separator a token cannot escape,
-// and neither the value nor the reason it would not parse is ever printed - so
-// a token holding a comma would become two unusable secrets in silence.
-func TestASecretInACollectionIsRefused(t *testing.T) {
-	t.Run("slice", func(t *testing.T) {
-		type config struct {
-			Tokens []secret.Secret `env:"TOKENS"`
+func TestSecretCollectionsAreSensitive(t *testing.T) {
+	type config struct {
+		Tokens []secret.Secret          `env:"TOKENS"`
+		Values map[string]secret.Secret `env:"VALUES"`
+	}
+	vars := manifested[config](t, "app")
+	for _, v := range vars {
+		if !v.Secret {
+			t.Fatal("collection not sensitive")
 		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "holds a secret in a slice") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("map value", func(t *testing.T) {
-		type config struct {
-			Tokens map[string]secret.Secret `env:"TOKENS"`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "holds a secret in a map") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("slice of pointers", func(t *testing.T) {
-		type config struct {
-			Tokens []*secret.Secret `env:"TOKENS"`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "holds a secret") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("a single secret is still read", func(t *testing.T) {
-		type config struct {
-			Token secret.Secret `env:"TOKEN"`
-		}
-
-		if got := names(manifested[config](t, "confxapp")); len(got) != 1 {
-			t.Fatalf("manifest = %v", got)
-		}
-	})
+	}
+	cfg, err := Load[config]("app", WithEnv(map[string]string{"APP_TOKENS": "one,two", "APP_VALUES": "key:three"}))
+	if err != nil || len(cfg.Tokens) != 2 || cfg.Values["key"].Reveal() != "three" {
+		t.Fatalf("collection load: %v", err)
+	}
 }
 
 // TestAnEnvPrefixThatExtendsNothingIsRefused covers the two shapes where the tag
@@ -321,22 +278,18 @@ func TestASecretInACollectionIsRefused(t *testing.T) {
 // second dropped the field from the config entirely.
 func TestAnEnvPrefixThatExtendsNothingIsRefused(t *testing.T) {
 	t.Run("on a field that names a variable", func(t *testing.T) {
-		type config struct {
+		if err := bindError[struct {
 			Host string `env:"HOST" envPrefix:"POOL_"`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "names a variable and declares envPrefix") {
+		}](t); !strings.Contains(err.Error(), "names a variable and declares envPrefix") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
 	t.Run("on a field that is not a struct", func(t *testing.T) {
-		type config struct {
+		if err := bindError[struct {
 			Host string `envPrefix:"POOL_"`
 			Port int    `env:"PORT"`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "is not a struct nested by value") {
+		}](t); !strings.Contains(err.Error(), "is not a struct nested by value") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -348,11 +301,9 @@ func TestAnEnvPrefixThatExtendsNothingIsRefused(t *testing.T) {
 			MaxConns int `env:"MAX_CONNS"`
 		}
 
-		type config struct {
+		if err := bindError[struct {
 			Pool *pool `envPrefix:"POOL_"`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "nest by value") {
+		}](t); !strings.Contains(err.Error(), "nest by value") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -362,18 +313,16 @@ func TestAnEnvPrefixThatExtendsNothingIsRefused(t *testing.T) {
 			MaxConns int `env:"MAX_CONNS"`
 		}
 
-		type config struct {
+		got := names(manifested[struct {
 			Pool pool `envPrefix:"POOL_"`
-		}
-
-		got := names(manifested[config](t, "confxapp"))
+		}](t, "confxapp"))
 		if len(got) != 1 || got[0] != "CONFXAPP_POOL_MAX_CONNS" {
 			t.Fatalf("manifest = %v", got)
 		}
 	})
 }
 
-func TestUnknownEnvOptionIsRefused(t *testing.T) {
+func TestUnknownLoaderOptionIsRefused(t *testing.T) {
 	cases := map[string]string{
 		"misspelled required": "HOST,requred",
 		"wrong case":          "HOST,notempty",
@@ -387,23 +336,17 @@ func TestUnknownEnvOptionIsRefused(t *testing.T) {
 
 			switch tag {
 			case "HOST,requred":
-				type config struct {
+				err = bindError[struct {
 					Host string `env:"HOST,requred"`
-				}
-
-				err = bindError[config](t)
+				}](t)
 			case "HOST,notempty":
-				type config struct {
+				err = bindError[struct {
 					Host string `env:"HOST,notempty"`
-				}
-
-				err = bindError[config](t)
+				}](t)
 			default:
-				type config struct {
+				err = bindError[struct {
 					Host string `env:"HOST,init"`
-				}
-
-				err = bindError[config](t)
+				}](t)
 			}
 
 			if !strings.Contains(err.Error(), "unknown env option") {
@@ -431,7 +374,7 @@ func TestSeparatorTagsApplyOnlyWhereValuesAreSplit(t *testing.T) {
 		}](t), "envSeparator applies to a slice or map"},
 		"separator on a pointer to a slice": {bindError[struct {
 			Names *[]string `env:"NAMES" envSeparator:";"`
-		}](t), "envSeparator applies to a slice or map"},
+		}](t), "must refer to a scalar"},
 		"separator without a variable": {bindError[struct {
 			Names []string `envSeparator:";"`
 		}](t), "declares a separator but names no variable"},

@@ -8,14 +8,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/uchaloop/confmaker"
+	"github.com/uchaloop/confmaker/v2"
+	"github.com/uchaloop/confmaker/v2/confexport"
 	"github.com/uchaloop/secret/v2"
 )
 
 type secretConfig struct {
-	Password secret.Secret   `env:"PASSWORD"`
-	Empty    secret.Secret   `env:"EMPTY"`
-	Pointer  **secret.Secret `env:"POINTER"`
+	Password secret.Secret  `env:"PASSWORD"`
+	Empty    secret.Secret  `env:"EMPTY"`
+	Pointer  *secret.Secret `env:"POINTER"`
 }
 
 func (c *secretConfig) SetDefaults() {
@@ -30,12 +31,15 @@ func TestSecretLoadingAndDescription(t *testing.T) {
 			env["APP_PASSWORD"] = "private-env"
 		}
 
-		diagnostics := confmaker.MakeDiagnostics()
-		loader := confmaker.MakeLoader(confmaker.WithEnv(env), confmaker.WithDiagnostics(diagnostics))
+		loader := confmaker.MakeLoader(confmaker.WithEnv(env), confmaker.WithDiagnostics())
 		handle := loader.Register[secretConfig]("app")
-		for _, write := range []func(io.Writer) error{loader.WriteEnvExample, loader.WriteManifestJSON, loader.WriteManifestMarkdown} {
+		manifest, err := loader.Manifest(confmaker.IncludeDefaults())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, write := range []func(io.Writer, confmaker.ManifestResult) error{confexport.WriteEnvExample, confexport.WriteJSON, confexport.WriteMarkdown} {
 			var output bytes.Buffer
-			if err := write(&output); err != nil {
+			if err := write(&output, manifest); err != nil {
 				t.Fatal(err)
 			}
 
@@ -58,11 +62,11 @@ func TestSecretLoadingAndDescription(t *testing.T) {
 			expected, source = "private-env", confmaker.SourceEnv
 		}
 
-		if cfg.Password.Reveal() != expected || !cfg.Empty.IsZero() || (**cfg.Pointer).Reveal() != "private-pointer" {
+		if cfg.Password.Reveal() != expected || !cfg.Empty.IsZero() || cfg.Pointer.Reveal() != "private-pointer" {
 			t.Fatal("incorrect secret loading")
 		}
 
-		report := diagnostics.Report()
+		report := loader.Report()
 		variables := report.Configs[0].Variables
 		if variables[0].Source != source || variables[1].Source != confmaker.SourceZero || variables[2].Source != confmaker.SourceEnv {
 			t.Fatal("incorrect diagnostic sources")

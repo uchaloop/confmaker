@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/uchaloop/confmaker"
+	"github.com/uchaloop/confmaker/v2"
 )
 
 // StoreConfig is the kind of config a library declares: plain fields, env tags,
@@ -14,7 +14,9 @@ type StoreConfig struct {
 	Timeout time.Duration `env:"TIMEOUT"`
 }
 
-func (c *StoreConfig) SetDefaults() { c.Timeout = 30 * time.Second }
+func (c *StoreConfig) SetDefaults() {
+	c.Timeout = 30 * time.Second
+}
 
 func (c StoreConfig) Validate() error {
 	if c.Timeout <= 0 {
@@ -75,8 +77,20 @@ func ExampleLoader() {
 		return
 	}
 
-	primaryCfg, _ := primary.Value()
-	replicaCfg, _ := replica.Value()
+	primaryCfg, err := primary.Value()
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	replicaCfg, err := replica.Value()
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
 	fmt.Println(primaryCfg.Host, replicaCfg.Host)
 
 	// Output:
@@ -86,15 +100,15 @@ func ExampleLoader() {
 // Manifest lists the variables and their defaults without reading the
 // environment. The output is ENV names and values, not an escaped shell script.
 func ExampleManifest() {
-	variables, err := confmaker.Manifest[StoreConfig]("store")
+	variables, err := confmaker.Manifest[StoreConfig]("store", confmaker.IncludeDefaults())
 	if err != nil {
 		fmt.Println(err)
 
 		return
 	}
 
-	for _, v := range variables {
-		fmt.Printf("%s=%s\n", v.Name, v.Default)
+	for _, v := range variables.Configs[0].Variables {
+		fmt.Printf("%s=%s\n", v.Name, v.Default.Text)
 	}
 
 	// Output:
@@ -121,7 +135,7 @@ func ExampleWithPrefix() {
 		return
 	}
 
-	fmt.Println(cfg.Host, variables[0].Name)
+	fmt.Println(cfg.Host, variables.Configs[0].Variables[0].Name)
 
 	// Output:
 	// db:5432 DATABASE_HOST
@@ -133,17 +147,17 @@ func ExampleLoader_Manifest() {
 	loader.Register[StoreConfig]("store")
 	loader.Register[StoreConfig]("replica", confmaker.WithPrefix("REPLICA_STORE_"))
 
-	configs, err := loader.Manifest()
+	configs, err := loader.Manifest(confmaker.IncludeDefaults())
 	if err != nil {
 		fmt.Println(err)
 
 		return
 	}
 
-	for _, config := range configs {
+	for _, config := range configs.Configs {
 		fmt.Println(config.InstanceName, config.Prefix)
 		for _, variable := range config.Variables {
-			fmt.Printf("%s=%s\n", variable.Name, variable.Default)
+			fmt.Printf("%s=%s\n", variable.Name, variable.Default.Text)
 		}
 	}
 
@@ -154,4 +168,27 @@ func ExampleLoader_Manifest() {
 	// store STORE_
 	// STORE_HOST=
 	// STORE_TIMEOUT=30s
+}
+
+func ExampleLoader_Report() {
+	loader := confmaker.MakeLoader(
+		confmaker.WithDiagnostics(),
+		confmaker.WithEnv(map[string]string{"STORE_HOST": "db:5432"}),
+	)
+	loader.Register[StoreConfig]("store")
+
+	fmt.Println(loader.Report().State)
+
+	if err := loader.Load(); err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	report := loader.Report()
+	fmt.Println(report.State, report.DetailLevel)
+
+	// Output:
+	// not_started
+	// succeeded field
 }

@@ -3,7 +3,6 @@ package confmaker
 import (
 	"errors"
 	"reflect"
-	"strings"
 	"sync"
 	"testing"
 )
@@ -25,17 +24,17 @@ func TestLoaderManifestMatchesSingleConfig(t *testing.T) {
 	loader := MakeLoader()
 	loader.Register[manifestConfig]("replica", WithPrefix("CUSTOM_"))
 	loader.Register[manifestConfig]("primary")
-	got, err := loader.Manifest()
+	got, err := loaderManifestForTest(loader)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	primary, err := Manifest[manifestConfig]("primary")
+	primary, err := singleManifestForTest[manifestConfig]("primary")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	replica, err := Manifest[manifestConfig]("replica", WithPrefix("CUSTOM_"))
+	replica, err := singleManifestForTest[manifestConfig]("replica", WithPrefix("CUSTOM_"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,14 +52,14 @@ func TestLoaderManifestDoesNotUseLoadOptionsOrValidate(t *testing.T) {
 	t.Parallel()
 	loader := MakeLoader(WithEnv(map[string]string{"APP_HOST": "env", "APP_TYPO": "x"}))
 	handle := loader.Register[manifestOnlyConfig]("app")
-	got, err := loader.Manifest()
-	if err != nil || len(got) != 1 || len(got[0].Variables[0].Default) != 0 {
+	got, err := loaderManifestForTest(loader)
+	if err != nil || len(got) != 1 || len(got[0].Variables[0].Default.Text) != 0 {
 		t.Fatalf("manifest: %v, %v", got, err)
 	}
 
 	invalidOptions := MakeLoader(nil, WithEnv(nil), WithEnv(nil))
 	invalidOptions.Register[manifestOnlyConfig]("app")
-	if _, err := invalidOptions.Manifest(); err != nil {
+	if _, err := loaderManifestForTest(invalidOptions); err != nil {
 		t.Fatalf("load options affected manifest: %v", err)
 	}
 
@@ -73,7 +72,7 @@ func TestLoaderManifestKeepsDefaultsSeparateFromLoadedValues(t *testing.T) {
 	t.Parallel()
 	loader := MakeLoader(WithEnv(map[string]string{"APP_ITEMS": "loaded"}))
 	handle := loader.Register[schemaNested]("app")
-	before, err := loader.Manifest()
+	before, err := loaderManifestForTest(loader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,13 +88,13 @@ func TestLoaderManifestKeepsDefaultsSeparateFromLoadedValues(t *testing.T) {
 	}
 
 	cfg.Items[0] = "mutated"
-	after, err := loader.Manifest()
+	after, err := loaderManifestForTest(loader)
 	if err != nil || len(after) != 2 || !reflect.DeepEqual(before[0], after[0]) {
 		t.Fatalf("manifest changed: %v, %v", after, err)
 	}
 
 	after[0].Variables[0].Name = "MUTATED"
-	again, err := loader.Manifest()
+	again, err := loaderManifestForTest(loader)
 	if err != nil || !reflect.DeepEqual(before[0], again[0]) {
 		t.Fatalf("manifest shares result storage: %v, %v", again, err)
 	}
@@ -127,7 +126,7 @@ func TestLoaderManifestRejectsDeclarationsAndConflictsBeforeDefaults(t *testing.
 			loader := MakeLoader()
 			loader.Register[manifestPanicDefaults]("guard")
 			register(loader)
-			got, err := loader.Manifest()
+			got, err := loaderManifestForTest(loader)
 			if err == nil || got != nil {
 				t.Fatalf("got %v, %v", got, err)
 			}
@@ -136,22 +135,16 @@ func TestLoaderManifestRejectsDeclarationsAndConflictsBeforeDefaults(t *testing.
 }
 
 func TestLoaderManifestReportsAllRenderErrorsAndDoesNotPreventLoad(t *testing.T) {
-	t.Parallel()
-	loader := MakeLoader(WithEnv(nil))
-	loader.Register[struct{}]("good")
-	loader.Register[brokenTextConfig]("z")
-	loader.Register[brokenTextConfig]("a")
-	got, err := loader.Manifest()
-	if got != nil || !errors.Is(err, errMarshalDefault) {
-		t.Fatalf("got %v, %v", got, err)
+	l := MakeLoader(WithEnv(nil))
+	l.Register[struct{}]("good")
+	l.Register[brokenTextConfig]("z")
+	l.Register[brokenTextConfig]("a")
+	r, err := l.Manifest(IncludeDefaults())
+	if err != nil || len(r.Configs) != 3 || len(r.Problems) != 2 || r.Problems[0].InstanceName != "a" || r.Problems[1].InstanceName != "z" {
+		t.Fatalf("%+v %v", r, err)
 	}
-
-	if !strings.Contains(err.Error(), `config "a"`) || !strings.Contains(err.Error(), `config "z"`) || strings.Index(err.Error(), `config "a"`) > strings.Index(err.Error(), `config "z"`) {
-		t.Fatalf("report: %v", err)
-	}
-
-	if err := loader.Load(); err != nil {
-		t.Fatalf("manifest failure poisoned load: %v", err)
+	if err := l.Load(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -164,7 +157,7 @@ func TestLoaderManifestAfterFailedLoad(t *testing.T) {
 		t.Fatal("expected missing required variable")
 	}
 
-	got, err := loader.Manifest()
+	got, err := loaderManifestForTest(loader)
 	if err != nil || len(got) != 1 {
 		t.Fatalf("manifest: %v, %v", got, err)
 	}
@@ -177,7 +170,7 @@ func TestLoaderManifestAfterFailedLoad(t *testing.T) {
 func TestEmptyLoaderManifest(t *testing.T) {
 	t.Parallel()
 	var loader Loader
-	got, err := loader.Manifest()
+	got, err := loaderManifestForTest(&loader)
 	if err != nil || got == nil || len(got) != 0 {
 		t.Fatalf("got %v, %v", got, err)
 	}
@@ -203,7 +196,7 @@ func TestLoaderManifestSnapshotsBeforeCallingUserCode(t *testing.T) {
 		var got []ConfigManifest
 		var manifestErr error
 		done := make(chan struct{})
-		go func() { defer close(done); got, manifestErr = loader.Manifest() }()
+		go func() { defer close(done); got, manifestErr = loaderManifestForTest(loader) }()
 		<-entered
 		loader.Register[struct{}]("second")
 		if _, err := handle.Value(); !errors.Is(err, ErrNotLoaded) {
@@ -219,7 +212,7 @@ func TestLoaderManifestSnapshotsBeforeCallingUserCode(t *testing.T) {
 		var group sync.WaitGroup
 		for range 8 {
 			group.Go(func() {
-				entries, err := loader.Manifest()
+				entries, err := loaderManifestForTest(loader)
 				if err != nil || len(entries) != 2 {
 					t.Errorf("concurrent manifest: %v, %v", entries, err)
 				}

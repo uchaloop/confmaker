@@ -1,14 +1,15 @@
-package confmaker
+package confexport
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
+	. "github.com/uchaloop/confmaker/v2"
 	"io"
 	"strings"
 	"testing"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 type envExampleConfig struct {
@@ -39,7 +40,7 @@ func (c envExampleConfig) Validate() error {
 
 func TestWriteEnvExample(t *testing.T) {
 	t.Setenv("APP_HOST", "environment-must-not-appear")
-	loader := MakeLoader()
+	loader := makeTestLoader()
 	config := loader.Register[envExampleConfig]("app")
 	var output bytes.Buffer
 	if err := loader.WriteEnvExample(&output); err != nil {
@@ -50,7 +51,7 @@ func TestWriteEnvExample(t *testing.T) {
 		"# API address\n# Use the staging endpoint\n# Required; must not be empty.\nAPP_HOST=https://api.example.test\n\n" +
 		"# APP_COUNT=\n\n# APP_ENABLED=\n\n" +
 		"# Required.\n# Secret; supply your own value.\n# APP_TOKEN=\n\n" +
-		"# APP_LABELS=\n\n# APP_COMMAND=\n\n# APP_MULTILINE=\n\n" +
+		"APP_LABELS=single\n\n# APP_COMMAND=\n\n# APP_MULTILINE=\n\n" +
 		"# Pool size\nAPP_POOL_SIZE=5\n\n"
 	if output.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", &output, want)
@@ -60,14 +61,14 @@ func TestWriteEnvExample(t *testing.T) {
 		t.Fatalf("generation changed handle state: %v", err)
 	}
 
-	variables, err := Manifest[envExampleConfig]("app")
+	variables, err := singleManifestForTest[envExampleConfig]("app")
 	if err != nil || variables[0].Description != "API address\nUse the staging endpoint" || variables[7].Description != "Pool size" {
 		t.Fatalf("descriptions missing: %v, %v", variables, err)
 	}
 }
 
 func TestWriteEnvExampleEscapesCommentContent(t *testing.T) {
-	loader := MakeLoader()
+	loader := makeTestLoader()
 	loader.Register[struct {
 		Value string `env:"BAD\nINJECTED" envDescription:"first\rINJECTED=value\x00"`
 	}]("app")
@@ -92,7 +93,7 @@ type exampleErrorWriter struct{ err error }
 func (w exampleErrorWriter) Write(p []byte) (int, error) { return 0, w.err }
 
 func TestWriteEnvExampleErrors(t *testing.T) {
-	loader := MakeLoader()
+	loader := makeTestLoader()
 	loader.Register[envExampleConfig]("app")
 	writeErr := errors.New("writer failed")
 	if err := loader.WriteEnvExample(exampleErrorWriter{writeErr}); !errors.Is(err, writeErr) {
@@ -136,8 +137,8 @@ func TestEnvExampleAssignmentSyntax(t *testing.T) {
 	}
 }
 
-func ExampleLoader_WriteEnvExample() {
-	loader := MakeLoader()
+func ExampleWriteEnvExample() {
+	loader := makeTestLoader()
 	loader.Register[struct {
 		URL string `env:"URL,notEmpty" envDescription:"Service endpoint"`
 	}]("api")

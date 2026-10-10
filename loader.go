@@ -2,7 +2,9 @@ package confmaker
 
 import (
 	"cmp"
+	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"sync"
@@ -32,6 +34,7 @@ type Loader struct {
 	registrations []*registration
 	done          chan struct{}
 	err           error
+	report        LoadReport
 }
 
 // loaderState tracks registration, loading and completion.
@@ -43,17 +46,18 @@ const (
 	loaded
 )
 
-// errLoadPanicked is the result of a load that user code panicked out of. The
+// ErrLoadPanicked is the result of a load that user code panicked out of. The
 // panic itself propagates from the Load call that ran it.
-var errLoadPanicked = errors.New("configuration loading panicked")
+var ErrLoadPanicked = errors.New("configuration loading panicked")
 
 // registration holds a compiled config or its declaration error.
 type registration struct {
 	descriptor
-	typeName string
-	name     string
-	err      error
-	fill     func(any, environment, *ConfigReport) error
+	typeName   string
+	name       string
+	err        error
+	fill       func(context.Context, any, environment, *ConfigReport, *LoadReport) error
+	fillEngine func(context.Context, Engine, any) error
 }
 
 // descriptor carries immutable schema and a factory for fresh defaults.
@@ -67,8 +71,8 @@ type descriptor struct {
 
 // MakeLoader returns an empty [Loader]. opts configure the whole load: [WithEnv],
 // [AllowUnknown], [WithDiagnostics] and [WithDiagnosticHandler].
-// A nil option is reported by [Loader.Load].
-func MakeLoader(opts ...EnvOption) *Loader {
+// WithEngine selects a custom backend. A nil option is reported by [Loader.Load].
+func MakeLoader(opts ...LoaderOption) *Loader {
 	l := &Loader{}
 	for _, opt := range opts {
 		if opt == nil {
@@ -80,20 +84,14 @@ func MakeLoader(opts ...EnvOption) *Loader {
 		opt.applyEnv(&l.env)
 	}
 
-	if l.env.diagnostics != nil {
-		if err := l.env.diagnostics.bindLoader(l); err != nil {
-			l.envErr = errors.Join(l.envErr, err)
-			l.env.diagnostics = nil
-		}
-	}
-
 	l.envErr = errors.Join(l.envErr, l.env.diagnosticErr)
 
 	return l
 }
 
 // Register registers a struct config of type T and returns its [Handle].
-// The required name labels errors and determines the default ENV prefix:
+// The required name labels errors. Custom engines accept any nonempty unique name.
+// With the built-in engine, the name determines the default ENV prefix:
 // "read-replica" reads READ_REPLICA_*. [WithPrefix] overrides only the prefix.
 // Names must be non-empty, contain only lowercase letters, digits, _ - .,
 // and start and end with a letter or digit.
@@ -114,14 +112,38 @@ func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
 
 	// Resolve the registration without holding the lock.
 	r := &registration{typeName: reflect.TypeFor[T]().String(), name: name}
-	r.descriptor, r.err = makeDescriptor[T](name, opts)
+	if l.env.engineSet {
+		r.descriptor, r.err = makeEngineDescriptor[T](name, opts)
+	} else {
+		r.descriptor, r.err = makeDescriptor[T](name, opts)
+	}
 	// Handles, including copies, share typed storage. Value exposes it only
 	// after Load publishes completion under the loader mutex.
 	value := new(T)
 	if r.err == nil {
-		r.fill = func(defaults any, env environment, report *ConfigReport) error {
+		r.fillEngine = func(ctx context.Context, engine Engine, target any) error {
+			cfg := target.(*T)
+			if err := engine.Load(ctx, LoadRequest{Name: name, Target: cfg}); err != nil {
+				return fmt.Errorf("config %q: %w", name, err)
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if v, ok := any(cfg).(interface{ Validate() error }); ok {
+				if err := v.Validate(); err != nil {
+					return wrapConfigError(name, makeConfigError(ErrorValidation, "", "", err))
+				}
+			}
+			*value = *cfg
+			return nil
+		}
+		r.fill = func(ctx context.Context, defaults any, env environment, report *ConfigReport, loadReport *LoadReport) error {
 			cfg := defaults.(*T)
-			if err := applyAndValidate(cfg, r.fields, r.instanceName, env, report); err != nil {
+			var onPanic func(error)
+			if loadReport != nil {
+				onPanic = func(err error) { recordLoadProblems(loadReport, wrapConfigError(r.instanceName, err)) }
+			}
+			if err := applyAndValidateContext(ctx, cfg, r.fields, r.instanceName, env, report, onPanic); err != nil {
 				return err
 			}
 
@@ -154,7 +176,17 @@ func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
 // reading the environment again; a call made while another goroutine loads waits
 // for that result. If user code panics during the load, the panic propagates from
 // the Load that ran it, and later calls return an error.
-func (l *Loader) Load() error {
+func (l *Loader) Load() error { return l.LoadContext(context.Background()) }
+
+// LoadContext starts the one-shot load or waits for its published result.
+// The initiating context controls loading; a waiter's cancellation only stops
+// that wait. Cancellation after starting is final. Cancellation before starting
+// leaves the loader available. Published results take precedence over cancellation.
+// User methods run synchronously and cannot be forcibly interrupted. ctx must not be nil.
+func (l *Loader) LoadContext(ctx context.Context) error {
+	if ctx == nil {
+		panic("nil context")
+	}
 	l.mu.Lock()
 	switch l.state {
 	case loaded:
@@ -163,12 +195,22 @@ func (l *Loader) Load() error {
 	case loading:
 		done := l.done
 		l.mu.Unlock()
-		<-done
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
 
 		l.mu.Lock()
 		defer l.mu.Unlock()
 
-		return l.err
+		if l.state == loaded {
+			return l.err
+		}
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		l.mu.Unlock()
+		return err
 	}
 
 	l.state = loading
@@ -178,14 +220,18 @@ func (l *Loader) Load() error {
 
 	sortRegistrations(registrations)
 	var report *LoadReport
-	if l.env.diagnostics != nil || l.env.diagnosticHandler != nil {
+	if l.env.diagnostics {
 		report = makeLoadReport(registrations)
-		if l.env.diagnostics != nil {
-			l.env.diagnostics.publishReport(LoadReport{State: LoadInProgress})
+		report.DetailLevel = DetailField
+		if l.env.engineSet {
+			report.DetailLevel = DetailConfig
 		}
+		l.mu.Lock()
+		l.report = LoadReport{State: LoadInProgress}
+		l.mu.Unlock()
 	}
 
-	err := errLoadPanicked
+	err := ErrLoadPanicked
 	defer func() {
 		if report != nil {
 			setLoadReportState(report, err)
@@ -194,25 +240,23 @@ func (l *Loader) Load() error {
 		l.mu.Lock()
 		l.err = err
 		l.state = loaded
-		if report != nil && l.env.diagnostics != nil {
-			l.env.diagnostics.publishReport(*report)
+		if report != nil {
+			l.report = *report
 		}
 
 		close(l.done)
 		l.mu.Unlock()
 
-		if report != nil && err != errLoadPanicked && l.env.diagnosticHandler != nil {
-			handlerReport := *report
-			if l.env.diagnostics != nil {
-				// The receiver owns the published slices; isolate the handler from them.
-				handlerReport = cloneLoadReport(handlerReport)
-			}
-
+		if report != nil && err != ErrLoadPanicked && l.env.diagnosticHandler != nil {
+			handlerReport := cloneLoadReport(*report)
 			l.env.diagnosticHandler(handlerReport)
 		}
 	}()
 
-	err = l.load(registrations, report)
+	err = l.load(ctx, registrations, report)
+	if ctx.Err() != nil {
+		err = errors.Join(err, ctx.Err())
+	}
 	if err != nil {
 		return err
 	}
@@ -222,7 +266,7 @@ func (l *Loader) Load() error {
 
 // Load loads one config of type T, as a [Loader] with a single registration would.
 // The required name determines the default ENV prefix. Options include
-// [ConfigOption] ([WithPrefix]) and [EnvOption]
+// [ConfigOption] ([WithPrefix]) and [LoaderOption]
 // ([WithEnv], [AllowUnknown], [WithDiagnostics],
 // [WithDiagnosticHandler]). Unknown variables are looked for under
 // T's own prefix only. On error it returns the zero T.
@@ -230,16 +274,22 @@ func (l *Loader) Load() error {
 //	cfg, err := confmaker.Load[store.Config]("store")
 //	cfg, err := confmaker.Load[store.Config]("replica", confmaker.WithEnv(vars))
 func Load[T any](name string, opts ...LoadOption) (T, error) {
+	return LoadContext[T](context.Background(), name, opts...)
+}
+
+// LoadContext loads one configuration with the cancellation rules of Loader.LoadContext.
+// It returns zero T on error. ctx must not be nil.
+func LoadContext[T any](ctx context.Context, name string, opts ...LoadOption) (T, error) {
 	var (
 		configOpts []ConfigOption
-		envOpts    []EnvOption
+		envOpts    []LoaderOption
 	)
 
 	for _, opt := range opts {
 		switch opt := opt.(type) {
 		case ConfigOption:
 			configOpts = append(configOpts, opt)
-		case EnvOption:
+		case LoaderOption:
 			envOpts = append(envOpts, opt)
 		default:
 			// Only nil gets here: the kinds are sealed. MakeLoader reports it.
@@ -250,7 +300,7 @@ func Load[T any](name string, opts ...LoadOption) (T, error) {
 	loader := MakeLoader(envOpts...)
 	handle := loader.Register[T](name, configOpts...)
 
-	if err := loader.Load(); err != nil {
+	if err := loader.LoadContext(ctx); err != nil {
 		var cfg T
 
 		return cfg, err
@@ -323,19 +373,20 @@ func makeDescriptor[T any](name string, opts []ConfigOption) (descriptor, error)
 		return descriptor{}, err
 	}
 
-	return descriptor{instanceName: set.name, prefix: set.prefix, fields: fields,
-		defaults: func() any {
-			cfg := new(T)
-			setDefaults(cfg)
-
-			return cfg
-		},
+	return descriptor{
+		instanceName: set.name,
+		prefix:       set.prefix,
+		fields:       fields,
+		defaults:     makeDefaults[T],
 	}, nil
 }
 
 // load processes valid registrations and accumulates errors. Conflicts stop the
 // load before defaults; other errors do not prevent checking remaining configs.
-func (l *Loader) load(registrations []*registration, report *LoadReport) error {
+func (l *Loader) load(ctx context.Context, registrations []*registration, report *LoadReport) error {
+	if l.env.engineSet {
+		return l.loadEngine(ctx, registrations, report)
+	}
 	var errs []error
 	if report != nil {
 		defer func() {
@@ -353,6 +404,15 @@ func (l *Loader) load(registrations []*registration, report *LoadReport) error {
 		errs = append(errs, makeConfigError(ErrorDeclaration, "", "", errors.New("WithEnv is given more than once; pass one complete environment")))
 	}
 
+	if err := checkIdentityConflicts(registrations); err != nil {
+		for _, r := range registrations {
+			if r.err != nil {
+				errs = append(errs, r.err)
+			}
+		}
+		errs = append(errs, err)
+		return errors.Join(errs...)
+	}
 	readyIndices := make([]int, 0, len(registrations))
 	for index, registration := range registrations {
 		if registration.err != nil {
@@ -383,7 +443,19 @@ func (l *Loader) load(registrations []*registration, report *LoadReport) error {
 
 	configs := make([]any, len(readyIndices))
 	for i, index := range readyIndices {
+		if ctx.Err() != nil {
+			return errors.Join(append(errs, ctx.Err())...)
+		}
+		if report != nil {
+			report.Configs[index].Status = ConfigInterrupted
+		}
 		configs[i] = registrations[index].defaults()
+		if ctx.Err() != nil {
+			return errors.Join(append(errs, ctx.Err())...)
+		}
+		if report != nil {
+			report.Configs[index].Status = ConfigNotProcessed
+		}
 	}
 
 	if err := checkUnknown(descriptors, known, l.env.allowed, env); err != nil {
@@ -391,18 +463,17 @@ func (l *Loader) load(registrations []*registration, report *LoadReport) error {
 	}
 
 	for i, index := range readyIndices {
+		if ctx.Err() != nil {
+			return errors.Join(append(errs, ctx.Err())...)
+		}
 		var configReport *ConfigReport
 		if report != nil {
 			configReport = &report.Configs[index]
+			configReport.Status = ConfigInterrupted
 		}
 
-		err := registrations[index].fill(configs[i], env, configReport)
-		if configReport != nil {
-			configReport.Status = ConfigSucceeded
-			if err != nil {
-				configReport.Status = ConfigFailed
-			}
-		}
+		err := registrations[index].fill(ctx, configs[i], env, configReport, report)
+		setConfigReportStatus(configReport, ctx, err)
 
 		if err != nil {
 			errs = append(errs, err)

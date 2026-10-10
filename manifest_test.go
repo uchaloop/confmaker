@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 // manifestConfig covers what a generator has to render: a plain field, a nested
@@ -31,7 +31,7 @@ func (c *manifestConfig) SetDefaults() {
 func manifested[T any](t *testing.T, name string, opts ...ConfigOption) []Variable {
 	t.Helper()
 
-	variables, err := Manifest[T](name, opts...)
+	variables, err := singleManifestForTest[T](name, opts...)
 	if err != nil {
 		t.Fatalf("manifest: %v", err)
 	}
@@ -44,7 +44,7 @@ func manifested[T any](t *testing.T, name string, opts ...ConfigOption) []Variab
 func bindError[T any](t *testing.T) error {
 	t.Helper()
 
-	if _, err := Manifest[T]("confxapp"); err != nil {
+	if _, err := singleManifestForTest[T]("confxapp"); err != nil {
 		return err
 	}
 
@@ -86,7 +86,7 @@ func TestManifestReportsFieldMetadata(t *testing.T) {
 	}
 
 	pool := byName["CONFXPOSTGRES_POOL_MAX_CONNS"]
-	if pool.Default != "2" || !pool.HasDefault {
+	if pool.Default.Text != "2" || (pool.Default.State != DefaultRendered) {
 		t.Errorf("the default from SetDefaults was not reported: %+v", pool)
 	}
 
@@ -96,11 +96,11 @@ func TestManifestReportsFieldMetadata(t *testing.T) {
 
 	// A duration renders in duration syntax, so the default is text
 	// the variable could carry back.
-	if timeout := byName["CONFXPOSTGRES_TIMEOUT"]; timeout.Default != "30s" {
-		t.Errorf("timeout default = %q, want 30s", timeout.Default)
+	if timeout := byName["CONFXPOSTGRES_TIMEOUT"]; timeout.Default.Text != "30s" {
+		t.Errorf("timeout default = %q, want 30s", timeout.Default.Text)
 	}
 
-	if host := byName["CONFXPOSTGRES_HOST"]; host.HasDefault || host.Required || host.Secret {
+	if host := byName["CONFXPOSTGRES_HOST"]; (host.Default.State == DefaultRendered) || host.Required || host.Secret {
 		t.Errorf("a plain field without a default was misreported: %+v", host)
 	}
 
@@ -165,7 +165,7 @@ func TestManifestRendersEnvExample(t *testing.T) {
 	for _, variable := range manifested[manifestConfig](t, "confxpostgres") {
 		out.WriteString(variable.Name)
 		out.WriteString("=")
-		out.WriteString(variable.Default)
+		out.WriteString(variable.Default.Text)
 		out.WriteString("\n")
 	}
 
@@ -185,8 +185,8 @@ func TestManifestOmitsSecretValueFromDefault(t *testing.T) {
 	variables := manifested[struct {
 		Password secret.Secret `env:"PASSWORD"`
 	}](t, "confxapp")
-	if strings.Contains(variables[0].Default, "s3cr3t") {
-		t.Fatalf("a secret leaked into the manifest: %q", variables[0].Default)
+	if strings.Contains(variables[0].Default.Text, "s3cr3t") {
+		t.Fatalf("a secret leaked into the manifest: %q", variables[0].Default.Text)
 	}
 }
 

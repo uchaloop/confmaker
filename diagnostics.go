@@ -1,15 +1,16 @@
 package confmaker
 
 import (
+	"context"
 	"errors"
 	"slices"
-	"sync"
 )
 
 // LoadState describes the progress of one load.
 type LoadState string
 
 const (
+	LoadDisabled   LoadState = "disabled"
 	LoadNotStarted LoadState = "not_started"
 	LoadInProgress LoadState = "in_progress"
 	LoadSucceeded  LoadState = "succeeded"
@@ -21,6 +22,7 @@ const (
 type ConfigStatus string
 
 const (
+	ConfigInterrupted  ConfigStatus = "interrupted"
 	ConfigNotProcessed ConfigStatus = "not_processed"
 	ConfigSucceeded    ConfigStatus = "succeeded"
 	ConfigFailed       ConfigStatus = "failed"
@@ -30,6 +32,7 @@ const (
 type VariableStatus string
 
 const (
+	VariableInterrupted  VariableStatus = "interrupted"
 	VariableNotProcessed VariableStatus = "not_processed"
 	VariableSucceeded    VariableStatus = "succeeded"
 	VariableFailed       VariableStatus = "failed"
@@ -47,15 +50,27 @@ const (
 	SourceMissing ValueSource = "missing"
 )
 
+// DetailLevel identifies the information available in a final report.
+type DetailLevel string
+
+const (
+	// DetailConfig provides registration outcomes without field information.
+	DetailConfig DetailLevel = "config"
+	// DetailField includes the built-in engine's field-level diagnostics.
+	DetailField DetailLevel = "field"
+)
+
 // LoadReport is a value-free snapshot. Problems never contain error messages or
 // causes. Configs include invalid registrations, whose fields may be unavailable.
 // Successful fields do not imply successful config validation or loading.
 // After a panic, completed stages retain their problems; the interrupted stage
 // may be incomplete.
 type LoadReport struct {
-	State    LoadState
-	Configs  []ConfigReport
-	Problems []LoadProblem
+	// DetailLevel is empty for disabled, not_started and in_progress snapshots.
+	DetailLevel DetailLevel
+	State       LoadState
+	Configs     []ConfigReport
+	Problems    []LoadProblem
 }
 
 // ConfigReport describes one registration, including its explicit name and Go type.
@@ -84,54 +99,28 @@ type LoadProblem struct {
 	FieldPath    string
 }
 
-// Diagnostics stores the report of one Loader. Its zero value is ready for use.
-// It is safe for concurrent use and must not be copied after first use.
-type Diagnostics struct {
-	mu     sync.Mutex
-	owner  *Loader
-	report LoadReport
-}
-
-// MakeDiagnostics creates a report receiver for one loader.
-func MakeDiagnostics() *Diagnostics { return &Diagnostics{} }
-
-// Report returns an independent snapshot. Before loading it reports
-// LoadNotStarted; during loading it reports LoadInProgress without partial results.
-// Reading a report never loads configs or waits for user callbacks.
-func (d *Diagnostics) Report() LoadReport {
-	d.mu.Lock()
-	report := d.report
-	d.mu.Unlock()
-
-	// Published reports are immutable; copy outside the lock.
-	report = cloneLoadReport(report)
-	if len(report.State) == 0 {
-		report.State = LoadNotStarted
+// Report returns an independent snapshot without starting or waiting for a load.
+// Without collection it returns LoadDisabled. With collection enabled it returns
+// LoadNotStarted before loading and LoadInProgress during loading, with no details
+// in either state. Final reports have state LoadSucceeded, LoadFailed or LoadPanicked
+// and retain completed work. They contain no values, error text or panic payloads.
+// Report is safe to call concurrently; changing its result does not affect the loader.
+func (l *Loader) Report() LoadReport {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.env.diagnostics {
+		return LoadReport{State: LoadDisabled}
 	}
 
-	return report
-}
-
-func (d *Diagnostics) bindLoader(loader *Loader) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if d.owner != nil && d.owner != loader {
-		return makeConfigError(ErrorDeclaration, "", "", errors.New("diagnostics already belongs to another loader"))
+	if l.state == loading {
+		return LoadReport{State: LoadInProgress}
 	}
 
-	d.owner = loader
+	if l.report.State == "" {
+		return LoadReport{State: LoadNotStarted}
+	}
 
-	return nil
-}
-
-// publishReport takes ownership of report. Neither the caller nor a handler may
-// mutate its slices after publication; public readers receive independent copies.
-func (d *Diagnostics) publishReport(report LoadReport) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	d.report = report
+	return cloneLoadReport(l.report)
 }
 
 func cloneLoadReport(report LoadReport) LoadReport {
@@ -145,18 +134,10 @@ func cloneLoadReport(report LoadReport) LoadReport {
 	return report
 }
 
-// WithDiagnostics enables collection into diagnostics. A nil receiver, repeated
-// option or receiver already owned by another loader is a declaration error.
-func WithDiagnostics(diagnostics *Diagnostics) EnvOption {
-	return envOption(func(s *envSettings) {
-		if diagnostics == nil || s.diagnostics != nil {
-			s.diagnosticErr = makeConfigError(ErrorDeclaration, "", "", errors.New("WithDiagnostics requires one non-nil receiver"))
-
-			return
-		}
-
-		s.diagnostics = diagnostics
-	})
+// WithDiagnostics enables collection of value-free reports on the loader.
+// Repeated use is harmless.
+func WithDiagnostics() LoaderOption {
+	return envOption(func(s *envSettings) { s.diagnostics = true })
 }
 
 // WithDiagnosticHandler enables collection and calls handler synchronously once
@@ -166,7 +147,7 @@ func WithDiagnostics(diagnostics *Diagnostics) EnvOption {
 // the completed load result. A nil or repeated handler is a declaration error.
 // Concurrent Load callers may return before the handler finishes.
 // No logging, process termination or error recovery is performed by this option.
-func WithDiagnosticHandler(handler func(LoadReport)) EnvOption {
+func WithDiagnosticHandler(handler func(LoadReport)) LoaderOption {
 	return envOption(func(s *envSettings) {
 		if handler == nil || s.diagnosticHandler != nil {
 			s.diagnosticErr = makeConfigError(ErrorDeclaration, "", "", errors.New("WithDiagnosticHandler requires one non-nil handler"))
@@ -175,6 +156,7 @@ func WithDiagnosticHandler(handler func(LoadReport)) EnvOption {
 		}
 
 		s.diagnosticHandler = handler
+		s.diagnostics = true
 	})
 }
 
@@ -183,6 +165,7 @@ func makeLoadReport(registrations []*registration) *LoadReport {
 		State:   LoadInProgress,
 		Configs: make([]ConfigReport, len(registrations)),
 	}
+
 	for i, registration := range registrations {
 		configReport := ConfigReport{
 			InstanceName: registration.name,
@@ -190,6 +173,7 @@ func makeLoadReport(registrations []*registration) *LoadReport {
 			Prefix:       registration.prefix,
 			Status:       ConfigNotProcessed,
 		}
+
 		if registration.err != nil {
 			configReport.Status = ConfigFailed
 		}
@@ -214,8 +198,19 @@ func makeLoadReport(registrations []*registration) *LoadReport {
 }
 
 func setLoadReportState(report *LoadReport, err error) {
+	if err != ErrLoadPanicked {
+		for _, p := range report.Problems {
+			if p.InstanceName != "" {
+				for i := range report.Configs {
+					if report.Configs[i].InstanceName == p.InstanceName {
+						report.Configs[i].Status = ConfigFailed
+					}
+				}
+			}
+		}
+	}
 	switch {
-	case err == errLoadPanicked:
+	case err == ErrLoadPanicked:
 		report.State = LoadPanicked
 	case err != nil:
 		report.State = LoadFailed
@@ -232,16 +227,6 @@ func recordLoadProblems(report *LoadReport, err error) {
 			return
 		}
 
-		if len(problem.InstanceName) != 0 {
-			for i := range report.Configs {
-				if report.Configs[i].InstanceName != problem.InstanceName {
-					continue
-				}
-
-				report.Configs[i].Status = ConfigFailed
-			}
-		}
-
 		report.Problems = append(report.Problems, LoadProblem{
 			Kind:         problem.Kind,
 			InstanceName: problem.InstanceName,
@@ -253,6 +238,20 @@ func recordLoadProblems(report *LoadReport, err error) {
 	case interface{ Unwrap() []error }:
 		for _, child := range problem.Unwrap() {
 			recordLoadProblems(report, child)
+		}
+	}
+}
+
+// setConfigReportStatus preserves interruption when cancellation caused the error.
+func setConfigReportStatus(report *ConfigReport, ctx context.Context, err error) {
+	if report == nil {
+		return
+	}
+
+	if err == nil || ctx.Err() == nil || !errors.Is(err, ctx.Err()) {
+		report.Status = ConfigSucceeded
+		if err != nil {
+			report.Status = ConfigFailed
 		}
 	}
 }

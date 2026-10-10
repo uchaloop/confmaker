@@ -20,12 +20,7 @@ type diagnosticConfig struct {
 func (c *diagnosticConfig) SetDefaults() { c.Default = 7 }
 
 func TestDiagnosticSourcesAndErrors(t *testing.T) {
-	diagnostics := MakeDiagnostics()
-	if diagnostics.Report().State != LoadNotStarted {
-		t.Fatal(diagnostics.Report())
-	}
-
-	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(map[string]string{"APP_INPUT": "private-invalid-value", "APP_EMPTY": ""}))
+	loader := MakeLoader(WithDiagnostics(), WithEnv(map[string]string{"APP_INPUT": "private-invalid-value", "APP_EMPTY": ""}))
 	loader.Register[diagnosticConfig]("app")
 
 	err := loader.Load()
@@ -33,7 +28,7 @@ func TestDiagnosticSourcesAndErrors(t *testing.T) {
 		t.Fatal("expected load error")
 	}
 
-	report := diagnostics.Report()
+	report := loader.Report()
 	if report.State != LoadFailed || len(report.Configs) != 1 || len(report.Problems) != 3 {
 		t.Fatal(report)
 	}
@@ -65,7 +60,7 @@ func TestDiagnosticSourcesAndErrors(t *testing.T) {
 
 	report.Configs[0].Variables[0].Name = "changed"
 	report.Problems[0].Kind = "changed"
-	if reflect.DeepEqual(report, diagnostics.Report()) {
+	if reflect.DeepEqual(report, loader.Report()) {
 		t.Fatal("report aliases internal data")
 	}
 
@@ -81,10 +76,10 @@ type diagnosticValidation struct {
 func (diagnosticValidation) Validate() error { return errors.New("private-validation-value") }
 
 func TestDiagnosticValidation(t *testing.T) {
-	diagnostics := MakeDiagnostics()
-	_, err := Load[diagnosticValidation]("app", WithDiagnostics(diagnostics), WithEnv(map[string]string{"APP_TOKEN": "private-env-value"}))
+	var captured LoadReport
+	_, err := Load[diagnosticValidation]("app", WithDiagnosticHandler(func(r LoadReport) { captured = r }), WithEnv(map[string]string{"APP_TOKEN": "private-env-value"}))
 
-	report := diagnostics.Report()
+	report := captured
 	if err == nil || report.Configs[0].Status != ConfigFailed || report.Configs[0].Variables[0].Status != VariableSucceeded || report.Problems[0].Kind != ErrorValidation {
 		t.Fatal(report, err)
 	}
@@ -95,13 +90,12 @@ func TestDiagnosticValidation(t *testing.T) {
 }
 
 func TestDiagnosticHandlerReadsCompletedLoad(t *testing.T) {
-	diagnostics := MakeDiagnostics()
 	var loader *Loader
 	var handle *Handle[struct{}]
 	callbackCalls := 0
-	loader = MakeLoader(WithDiagnostics(diagnostics), WithEnv(nil), WithDiagnosticHandler(func(report LoadReport) {
+	loader = MakeLoader(WithDiagnostics(), WithEnv(nil), WithDiagnosticHandler(func(report LoadReport) {
 		callbackCalls++
-		if report.State != LoadSucceeded || diagnostics.Report().State != LoadSucceeded {
+		if report.State != LoadSucceeded || loader.Report().State != LoadSucceeded {
 			t.Fatal(report)
 		}
 
@@ -124,14 +118,13 @@ func TestDiagnosticHandlerReadsCompletedLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if callbackCalls != 1 || diagnostics.Report().Configs[0].InstanceName != "app" {
-		t.Fatal(callbackCalls, diagnostics.Report())
+	if callbackCalls != 1 || loader.Report().Configs[0].InstanceName != "app" {
+		t.Fatal(callbackCalls, loader.Report())
 	}
 }
 
 func TestDiagnosticConflictAndInvalidRegistration(t *testing.T) {
-	diagnostics := MakeDiagnostics()
-	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(nil))
+	loader := MakeLoader(WithDiagnostics(), WithEnv(nil))
 	loader.Register[diagnosticConfig]("app")
 	loader.Register[diagnosticConfig]("app")
 	loader.Register[int]("invalid")
@@ -139,7 +132,7 @@ func TestDiagnosticConflictAndInvalidRegistration(t *testing.T) {
 		t.Fatal("expected conflict")
 	}
 
-	report := diagnostics.Report()
+	report := loader.Report()
 	if len(report.Configs) != 3 {
 		t.Fatal(report)
 	}
@@ -158,28 +151,10 @@ func TestDiagnosticConflictAndInvalidRegistration(t *testing.T) {
 }
 
 func TestDiagnosticOptions(t *testing.T) {
-	diagnostics := MakeDiagnostics()
-	owner := MakeLoader(WithDiagnostics(diagnostics))
-	for _, opts := range [][]EnvOption{
-		{WithDiagnostics(nil)},
-		{WithDiagnostics(diagnostics)},
-		{WithDiagnostics(MakeDiagnostics()), WithDiagnostics(MakeDiagnostics())},
-		{WithDiagnosticHandler(nil)},
-		{WithDiagnosticHandler(func(LoadReport) {}), WithDiagnosticHandler(func(LoadReport) {})},
-	} {
-		loader := MakeLoader(opts...)
-		problems := ConfigErrors(loader.Load())
-		if len(problems) == 0 || problems[0].Kind != ErrorDeclaration {
-			t.Fatal(problems)
+	for _, opts := range [][]LoaderOption{{WithDiagnosticHandler(nil)}, {WithDiagnosticHandler(func(LoadReport) {}), WithDiagnosticHandler(func(LoadReport) {})}} {
+		if p := ConfigErrors(MakeLoader(opts...).Load()); len(p) == 0 || p[0].Kind != ErrorDeclaration {
+			t.Fatal(p)
 		}
-	}
-
-	if diagnostics.Report().State != LoadNotStarted {
-		t.Fatal("foreign load changed report")
-	}
-
-	if err := owner.Load(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -195,8 +170,7 @@ func (diagnosticBlockingConfig) Validate() error {
 }
 
 func TestDiagnosticConcurrentReaders(t *testing.T) {
-	diagnostics := MakeDiagnostics()
-	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(nil))
+	loader := MakeLoader(WithDiagnostics(), WithEnv(nil))
 	loader.Register[diagnosticBlockingConfig]("app")
 	entered, release := make(chan struct{}), make(chan struct{})
 	diagnosticValidationEntered, diagnosticValidationRelease = entered, release
@@ -207,7 +181,7 @@ func TestDiagnosticConcurrentReaders(t *testing.T) {
 	for range 8 {
 		readers.Go(func() {
 			for range 100 {
-				if report := diagnostics.Report(); report.State != LoadInProgress || len(report.Configs) != 0 {
+				if report := loader.Report(); report.State != LoadInProgress || len(report.Configs) != 0 {
 					t.Error(report)
 				}
 			}
@@ -220,8 +194,8 @@ func TestDiagnosticConcurrentReaders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if diagnostics.Report().State != LoadSucceeded {
-		t.Fatal(diagnostics.Report())
+	if loader.Report().State != LoadSucceeded {
+		t.Fatal(loader.Report())
 	}
 }
 
@@ -230,8 +204,7 @@ type diagnosticPanics struct{}
 func (diagnosticPanics) Validate() error { panic("original panic") }
 
 func TestDiagnosticPanic(t *testing.T) {
-	diagnostics := MakeDiagnostics()
-	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(nil), WithDiagnosticHandler(func(LoadReport) { t.Error("handler called after panic") }))
+	loader := MakeLoader(WithDiagnostics(), WithEnv(nil), WithDiagnosticHandler(func(LoadReport) { t.Error("handler called after panic") }))
 	loader.Register[diagnosticPanics]("app")
 	func() {
 		defer func() {
@@ -241,14 +214,13 @@ func TestDiagnosticPanic(t *testing.T) {
 		}()
 		_ = loader.Load()
 	}()
-	if diagnostics.Report().State != LoadPanicked || loader.Load() != errLoadPanicked {
-		t.Fatal(diagnostics.Report())
+	if loader.Report().State != LoadPanicked || loader.Load() != ErrLoadPanicked {
+		t.Fatal(loader.Report())
 	}
 }
 
 func TestDiagnosticHandlerPanicKeepsResult(t *testing.T) {
-	diagnostics := MakeDiagnostics()
-	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(nil), WithDiagnosticHandler(func(LoadReport) { panic("handler panic") }))
+	loader := MakeLoader(WithDiagnostics(), WithEnv(nil), WithDiagnosticHandler(func(LoadReport) { panic("handler panic") }))
 	func() {
 		defer func() {
 			if recover() != "handler panic" {
@@ -257,8 +229,8 @@ func TestDiagnosticHandlerPanicKeepsResult(t *testing.T) {
 		}()
 		_ = loader.Load()
 	}()
-	if diagnostics.Report().State != LoadSucceeded || loader.Load() != nil {
-		t.Fatal(diagnostics.Report())
+	if loader.Report().State != LoadSucceeded || loader.Load() != nil {
+		t.Fatal(loader.Report())
 	}
 }
 
@@ -269,15 +241,14 @@ type diagnosticDefaultsConfig struct{}
 func (*diagnosticDefaultsConfig) SetDefaults() { diagnosticDefaultsCalls++ }
 
 func TestDiagnosticsDoNotRepeatProcessing(t *testing.T) {
-	diagnostics := MakeDiagnostics()
-	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(nil))
+	loader := MakeLoader(WithDiagnostics(), WithEnv(nil))
 	handle := loader.Register[diagnosticDefaultsConfig]("app")
 
-	if _, err := loader.Manifest(); err != nil {
+	if _, err := loaderManifestForTest(loader); err != nil {
 		t.Fatal(err)
 	}
 
-	if diagnostics.Report().State != LoadNotStarted {
+	if loader.Report().State != LoadNotStarted {
 		t.Fatal("manifest collected load report")
 	}
 
@@ -306,16 +277,15 @@ func TestDiagnosticsPreserveLoadResult(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	diagnostics := MakeDiagnostics()
-	actual, err := Load[diagnosticConfig]("app", env, WithDiagnostics(diagnostics))
-	if err != nil || actual != expected || diagnostics.Report().State != LoadSucceeded {
-		t.Fatal(actual, err, diagnostics.Report())
+	var captured LoadReport
+	actual, err := Load[diagnosticConfig]("app", env, WithDiagnosticHandler(func(r LoadReport) { captured = r }))
+	if err != nil || actual != expected || captured.State != LoadSucceeded {
+		t.Fatal(actual, err, captured)
 	}
 }
 
 func TestDiagnosticPanicPreservesCompletedProblems(t *testing.T) {
-	diagnostics := MakeDiagnostics()
-	loader := MakeLoader(WithDiagnostics(diagnostics), WithEnv(nil))
+	loader := MakeLoader(WithDiagnostics(), WithEnv(nil))
 	loader.Register[diagnosticValidation]("first")
 	loader.Register[diagnosticPanics]("second")
 	func() {
@@ -324,17 +294,16 @@ func TestDiagnosticPanicPreservesCompletedProblems(t *testing.T) {
 		_ = loader.Load()
 	}()
 
-	report := diagnostics.Report()
+	report := loader.Report()
 	if report.State != LoadPanicked || len(report.Problems) != 1 || report.Problems[0].Kind != ErrorValidation {
 		t.Fatal(report)
 	}
 }
 
 func TestDiagnosticHandlerCannotMutatePublishedSlices(t *testing.T) {
-	diagnostics := MakeDiagnostics()
 	loader := MakeLoader(
 		WithEnv(nil),
-		WithDiagnostics(diagnostics),
+		WithDiagnostics(),
 		WithDiagnosticHandler(func(report LoadReport) {
 			report.Configs[0].Variables[0].Name = "changed"
 			report.Problems[0].Kind = ErrorConflict
@@ -346,7 +315,7 @@ func TestDiagnosticHandlerCannotMutatePublishedSlices(t *testing.T) {
 		t.Fatal("expected required variable errors")
 	}
 
-	report := diagnostics.Report()
+	report := loader.Report()
 	if report.Configs[0].Variables[0].Name != "APP_DEFAULT" || report.Problems[0].Kind != ErrorRequired {
 		t.Fatal("handler changed published report", report)
 	}

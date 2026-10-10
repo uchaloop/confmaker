@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 type jsonCollectionConfig struct {
@@ -73,7 +73,7 @@ func TestJSONNullAndEmpty(t *testing.T) {
 	}
 
 	pointer, err := loadJSONValue[*[]int]("null")
-	if err != nil || pointer != nil {
+	if err == nil || pointer != nil {
 		t.Fatal(pointer, err)
 	}
 
@@ -121,7 +121,7 @@ func rejectJSONType[T any](t *testing.T) {
 	loader.Register[struct {
 		Value T `env:"VALUE" envFormat:"json"`
 	}]("app")
-	_, manifestErr := loader.Manifest()
+	_, manifestErr := loaderManifestForTest(loader)
 
 	for _, err := range []error{loader.Load(), manifestErr} {
 		problems := ConfigErrors(err)
@@ -160,8 +160,6 @@ func TestJSONRejectsStructsAndUnsupportedTypes(t *testing.T) {
 	rejectJSONType[[2]byte](t)
 	rejectJSONType[[]chan int](t)
 	rejectJSONType[map[float64]string](t)
-	rejectJSONType[[]secret.Secret](t)
-	rejectJSONType[[]jsonTextWithSecret](t)
 	rejectJSONType[string](t)
 }
 
@@ -171,14 +169,16 @@ func TestJSONCustomTextAndManifestRoundTrip(t *testing.T) {
 		t.Fatal(text, err)
 	}
 
-	variables, err := Manifest[jsonCollectionConfig]("app")
+	variables, err := singleManifestForTest[jsonCollectionConfig]("app")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	env := make(map[string]string)
 	for _, v := range variables {
-		env[v.Name] = v.Default
+		if v.Default.State == DefaultRendered {
+			env[v.Name] = v.Default.Text
+		}
 	}
 
 	cfg, err := Load[jsonCollectionConfig]("app", WithEnv(env))
@@ -252,30 +252,30 @@ func (*jsonDualText) UnmarshalJSON([]byte) error     { panic("JSON method must n
 func (*jsonDualText) MarshalJSON() ([]byte, error)   { panic("JSON method must not run") }
 
 type jsonTextDefaults struct {
-	Values []*jsonDualText               `env:"VALUES" envFormat:"json"`
+	Values []jsonDualText                `env:"VALUES" envFormat:"json"`
 	Keys   map[jsonDualText]jsonDualText `env:"KEYS" envFormat:"json"`
 	Times  []time.Time                   `env:"TIMES" envFormat:"json"`
 }
 
 func (c *jsonTextDefaults) SetDefaults() {
-	c.Values = []*jsonDualText{{Value: "hello"}, nil}
+	c.Values = []jsonDualText{{Value: "hello"}}
 	c.Keys = map[jsonDualText]jsonDualText{{Value: "key"}: {Value: "value"}}
 	c.Times = []time.Time{time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}
 }
 
 func TestJSONTextMethodsTakePrecedence(t *testing.T) {
-	variables, err := Manifest[jsonTextDefaults]("app")
+	variables, err := singleManifestForTest[jsonTextDefaults]("app")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if variables[0].Default != `["hello",null]` || variables[1].Default != `{"key":"value"}` {
+	if variables[0].Default.Text != `["hello"]` || variables[1].Default.Text != `{"key":"value"}` {
 		t.Fatal(variables)
 	}
 
 	env := make(map[string]string)
 	for _, variable := range variables {
-		env[variable.Name] = variable.Default
+		env[variable.Name] = variable.Default.Text
 	}
 
 	loaded, err := Load[jsonTextDefaults]("app", WithEnv(env))
@@ -290,7 +290,7 @@ func TestJSONTextMethodsTakePrecedence(t *testing.T) {
 	}
 
 	for _, raw := range []string{`[{}]`, `[1]`, `[true]`} {
-		if _, err := loadJSONValue[[]*jsonDualText](raw); err == nil {
+		if _, err := loadJSONValue[[]jsonDualText](raw); err == nil {
 			t.Fatalf("accepted non-text element: %s", raw)
 		}
 	}
@@ -314,13 +314,11 @@ func (c *jsonReadOnlyDefaults) SetDefaults() {
 
 func TestJSONTextDefaultRequiresMarshaler(t *testing.T) {
 	loaded, err := Load[jsonReadOnlyDefaults]("app", WithEnv(map[string]string{"APP_VALUES": `["input"]`}))
-	if err != nil || len(loaded.Values) != 1 || loaded.Values[0].Value != "input" {
-		t.Fatal(loaded, err)
+	if err != nil || loaded.Values[0].Value != "input" {
+		t.Fatal(err)
 	}
-
-	variables, err := Manifest[jsonReadOnlyDefaults]("app")
-	problems := ConfigErrors(err)
-	if variables != nil || len(problems) != 1 || problems[0].Kind != ErrorDefaultRender || problems[0].VariableName != "APP_VALUES" {
-		t.Fatal(variables, err)
+	r, err := Manifest[jsonReadOnlyDefaults]("app", IncludeDefaults())
+	if err != nil || len(r.Problems) != 1 || r.Problems[0].VariableName != "APP_VALUES" || r.Configs[0].Variables[0].Default.State != DefaultUnrenderable {
+		t.Fatalf("%+v %v", r, err)
 	}
 }

@@ -1,6 +1,7 @@
 package confmaker
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -10,14 +11,15 @@ import (
 // fieldSpec describes a leaf without holding a config value or rendered default.
 // A registration shares this immutable schema between loading and inspection.
 type fieldSpec struct {
-	Name, Type       string
-	Description      string
-	Required, Secret bool
-	NotEmpty         bool
-	field            string
-	index            []int
-	render           renderer
-	parse            parser
+	Name, Type                         string
+	format, separator, keyValSeparator string
+	Description                        string
+	Required, Secret                   bool
+	NotEmpty                           bool
+	field                              string
+	index                              []int
+	render                             renderer
+	parse                              parser
 }
 
 // prepareConfig validates registration options and compiles the schema before
@@ -187,13 +189,6 @@ func compileField(
 		return fieldSpec{}, fmt.Errorf("field %s: %w", fieldPath, err)
 	}
 
-	if holdsSecretInCollection(field.Type) {
-		return fieldSpec{}, fmt.Errorf(
-			"field %s holds a secret in a %s; give each secret its own variable",
-			fieldPath, field.Type.Kind(),
-		)
-	}
-
 	// The environment cannot carry a name with = or NUL: such a variable could
 	// be passed through WithEnv but never set in a process.
 	fullName := prefix + name
@@ -201,13 +196,33 @@ func compileField(
 		return fieldSpec{}, fmt.Errorf("field %s reads %q, which no environment variable can be named", fieldPath, fullName)
 	}
 
-	secret := isSecretType(field.Type)
+	secret := opts.secret || isSecretType(field.Type)
 	codec, err := makeFieldCodec(field)
 	if err != nil {
 		return fieldSpec{}, fmt.Errorf("field %s: %w", fieldPath, err)
 	}
 
+	format := field.Tag.Get("envFormat")
+	if format == "" {
+		format = "plain"
+	}
+	sep, kv := "", ""
+	if format == "plain" && !declaresTextForm(field.Type) {
+		if field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Map {
+			sep = field.Tag.Get("envSeparator")
+			if sep == "" {
+				sep = defaultSeparator
+			}
+		}
+		if field.Type.Kind() == reflect.Map {
+			kv = field.Tag.Get("envKeyValSeparator")
+			if kv == "" {
+				kv = defaultKeyValSeparator
+			}
+		}
+	}
 	return fieldSpec{
+		format: format, separator: sep, keyValSeparator: kv,
 		Name: fullName, Type: field.Type.String(), Description: field.Tag.Get("envDescription"),
 		Required: opts.required || opts.notEmpty, NotEmpty: opts.notEmpty, Secret: secret,
 		field: fieldPath, index: index, parse: codec.parse,
@@ -218,9 +233,16 @@ func compileField(
 // applyAndValidate applies the environment over the defaults already in cfg and
 // validates the result. Validate runs only when every variable parsed: a
 // half-filled config would report problems that are not there.
-func applyAndValidate[T any](cfg *T, fields []fieldSpec, name string, env environment, report *ConfigReport) error {
-	if err := applyEnvironment(reflect.ValueOf(cfg).Elem(), fields, env, report); err != nil {
+func applyAndValidate[T any](cfg *T, fields []fieldSpec, name string, env environment, report *ConfigReport, onPanic func(error)) error {
+	return applyAndValidateContext(context.Background(), cfg, fields, name, env, report, onPanic)
+}
+func applyAndValidateContext[T any](ctx context.Context, cfg *T, fields []fieldSpec, name string, env environment, report *ConfigReport, onPanic func(error)) error {
+	if err := applyEnvironment(reflect.ValueOf(cfg).Elem(), fields, env, report, onPanic); err != nil {
 		return wrapConfigError(name, err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Check cfg (a *T), not *cfg: *T's method set includes both value- and
@@ -239,8 +261,14 @@ func applyAndValidate[T any](cfg *T, fields []fieldSpec, name string, env enviro
 // A variable that is not set
 // leaves its field untouched - that is what preserves the values SetDefaults
 // established - and every problem is reported together.
-func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environment, report *ConfigReport) error {
+func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environment, report *ConfigReport, onPanic func(error)) error {
 	var errs []error
+	finished := false
+	defer func() {
+		if !finished && onPanic != nil {
+			onPanic(errors.Join(errs...))
+		}
+	}()
 
 	for i, b := range fieldSpecs {
 		raw, set := env[b.Name]
@@ -282,6 +310,9 @@ func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environmen
 			continue
 		}
 
+		if variable != nil {
+			variable.Status = VariableInterrupted
+		}
 		if err := b.parse(root.FieldByIndex(b.index), raw); err != nil {
 			if variable != nil {
 				variable.Status = VariableFailed
@@ -297,6 +328,7 @@ func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environmen
 		}
 	}
 
+	finished = true
 	return errors.Join(errs...)
 }
 
@@ -384,38 +416,39 @@ func typeDeclaresVariables(t reflect.Type, seen map[reflect.Type]bool) bool {
 // checkPointerChains rejects pointer-only cycles, while allowing recursive
 // structs and collections whose pointers eventually reach a concrete shape.
 func checkPointerChains(t reflect.Type, seen map[reflect.Type]bool) error {
+	return checkENVShape(t, false, seen)
+}
+func checkENVShape(t reflect.Type, inCollection bool, seen map[reflect.Type]bool) error {
+	if t.Kind() == reflect.Pointer {
+		if inCollection || t.Elem().Kind() == reflect.Pointer {
+			return fmt.Errorf("unsupported pointer shape %s", t)
+		}
+		elem := t.Elem()
+		if declaresTextForm(elem) {
+			return nil
+		}
+		switch elem.Kind() {
+		case reflect.Slice, reflect.Map, reflect.Array, reflect.Struct, reflect.Interface:
+			return fmt.Errorf("pointer %s must refer to a scalar or text type", t)
+		}
+		return nil
+	}
 	if seen[t] {
 		return nil
 	}
-
 	seen[t] = true
-
-	chain := make(map[reflect.Type]bool)
-	for t.Kind() == reflect.Pointer {
-		if chain[t] {
-			return fmt.Errorf("cyclic pointer chain at %s cannot represent an ENV value", t)
-		}
-
-		chain[t] = true
-		t = t.Elem()
+	if declaresTextForm(t) {
+		return nil
 	}
-
 	switch t.Kind() {
 	case reflect.Slice, reflect.Array:
-		return checkPointerChains(t.Elem(), seen)
+		return checkENVShape(t.Elem(), true, seen)
 	case reflect.Map:
-		if err := checkPointerChains(t.Key(), seen); err != nil {
+		if err := checkENVShape(t.Key(), true, seen); err != nil {
 			return err
 		}
-		return checkPointerChains(t.Elem(), seen)
-	case reflect.Struct:
-		for field := range t.Fields() {
-			if err := checkPointerChains(field.Type, seen); err != nil {
-				return err
-			}
-		}
+		return checkENVShape(t.Elem(), true, seen)
 	}
-
 	return nil
 }
 
@@ -423,6 +456,7 @@ func checkPointerChains(t reflect.Type, seen map[reflect.Type]bool) error {
 type envTagOptions struct {
 	required bool
 	notEmpty bool
+	secret   bool
 }
 
 // parseEnvTagOptions reads that suffix. An option the tag does not define is an
@@ -441,6 +475,8 @@ func parseEnvTagOptions(suffix string) (envTagOptions, error) {
 
 		switch current {
 		case "":
+		case "secret":
+			parsed.secret = true
 		case "required":
 			parsed.required = true
 		case "notEmpty":

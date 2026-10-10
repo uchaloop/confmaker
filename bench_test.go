@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uchaloop/secret/v2"
+	secret "github.com/uchaloop/confmaker/v2/internal/testsecret"
 )
 
 // benchPool and benchConfig are the shape of a real infrastructure config: a
@@ -47,7 +47,7 @@ func BenchmarkManifest(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := Manifest[benchConfig]("confxbench"); err != nil {
+		if _, err := singleManifestForTest[benchConfig]("confxbench"); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -82,7 +82,7 @@ func BenchmarkLoadOne(b *testing.B) {
 						var err error
 						if mode == "compiled" {
 							setDefaults(&cfg)
-							err = applyAndValidate(&cfg, fields, "confxbench", env, nil)
+							err = applyAndValidate(&cfg, fields, "confxbench", env, nil, nil)
 						} else {
 							cfg, err = Load[benchConfig]("confxbench", WithEnv(env))
 						}
