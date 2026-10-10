@@ -349,11 +349,9 @@ func TestEmptySeparatorIsRefused(t *testing.T) {
 	})
 
 	t.Run("map key separator", func(t *testing.T) {
-		type config struct {
+		if err := bindError[struct {
 			Tiers map[string]string `env:"TIERS" envKeyValSeparator:""`
-		}
-
-		if err := bindError[config](t); !strings.Contains(err.Error(), "envKeyValSeparator") {
+		}](t); !strings.Contains(err.Error(), "envKeyValSeparator") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})

@@ -44,15 +44,24 @@ func WriteJSON(writer io.Writer, configs c.ManifestResult) error {
 
 	for _, config := range configs.Configs {
 		entry := configManifestJSON{
-			InstanceName: config.InstanceName, Prefix: config.Prefix,
-			Variables: make([]variableJSON, 0, len(config.Variables)),
+			InstanceName: config.InstanceName,
+			Prefix:       config.Prefix,
+			Variables:    make([]variableJSON, 0, len(config.Variables)),
 		}
 
 		for _, variable := range config.Variables {
 			field := variableJSON{
-				Name: variable.Name, Description: variable.Description, Type: variable.Type,
-				Required: variable.Required, NotEmpty: variable.NotEmpty, Secret: variable.Secret,
-				Default: defaultJSON{State: variable.Default.State}, FieldPath: variable.FieldPath, Format: variable.Format, Separator: variable.Separator, KeyValSeparator: variable.KeyValSeparator,
+				Name:            variable.Name,
+				Description:     variable.Description,
+				Type:            variable.Type,
+				Required:        variable.Required,
+				NotEmpty:        variable.NotEmpty,
+				Secret:          variable.Secret,
+				Default:         defaultJSON{State: variable.Default.State},
+				FieldPath:       variable.FieldPath,
+				Format:          variable.Format,
+				Separator:       variable.Separator,
+				KeyValSeparator: variable.KeyValSeparator,
 			}
 
 			if !variable.Secret && variable.Default.State == c.DefaultRendered {

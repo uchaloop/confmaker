@@ -2,9 +2,10 @@ package confexport
 
 import (
 	"fmt"
-	c "github.com/uchaloop/confmaker/v2"
 	"io"
 	"strings"
+
+	c "github.com/uchaloop/confmaker/v2"
 )
 
 // WriteEnvExample writes a prepared manifest as a reference ENV template.
@@ -12,7 +13,6 @@ import (
 // Sensitive values are omitted. No user code executes; writer errors may leave
 // partial output. This is not a promise of compatibility with every dotenv parser.
 func WriteEnvExample(writer io.Writer, manifest c.ManifestResult) error {
-
 	var output strings.Builder
 	for _, config := range manifest.Configs {
 		fmt.Fprintf(&output, "# Configuration: %q\n", config.InstanceName)

@@ -1,6 +1,7 @@
 package confmaker
 
 import (
+	"context"
 	"errors"
 	"slices"
 )
@@ -237,6 +238,20 @@ func recordLoadProblems(report *LoadReport, err error) {
 	case interface{ Unwrap() []error }:
 		for _, child := range problem.Unwrap() {
 			recordLoadProblems(report, child)
+		}
+	}
+}
+
+// setConfigReportStatus preserves interruption when cancellation caused the error.
+func setConfigReportStatus(report *ConfigReport, ctx context.Context, err error) {
+	if report == nil {
+		return
+	}
+
+	if err == nil || ctx.Err() == nil || !errors.Is(err, ctx.Err()) {
+		report.Status = ConfigSucceeded
+		if err != nil {
+			report.Status = ConfigFailed
 		}
 	}
 }

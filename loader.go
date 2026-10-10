@@ -373,13 +373,11 @@ func makeDescriptor[T any](name string, opts []ConfigOption) (descriptor, error)
 		return descriptor{}, err
 	}
 
-	return descriptor{instanceName: set.name, prefix: set.prefix, fields: fields,
-		defaults: func() any {
-			cfg := new(T)
-			setDefaults(cfg)
-
-			return cfg
-		},
+	return descriptor{
+		instanceName: set.name,
+		prefix:       set.prefix,
+		fields:       fields,
+		defaults:     makeDefaults[T],
 	}, nil
 }
 
@@ -475,12 +473,7 @@ func (l *Loader) load(ctx context.Context, registrations []*registration, report
 		}
 
 		err := registrations[index].fill(ctx, configs[i], env, configReport, report)
-		if configReport != nil && (err == nil || ctx.Err() == nil || !errors.Is(err, ctx.Err())) {
-			configReport.Status = ConfigSucceeded
-			if err != nil {
-				configReport.Status = ConfigFailed
-			}
-		}
+		setConfigReportStatus(configReport, ctx, err)
 
 		if err != nil {
 			errs = append(errs, err)

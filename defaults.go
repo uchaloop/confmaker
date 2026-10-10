@@ -46,3 +46,11 @@ func setDefaults[T any](cfg *T) {
 		d.SetDefaults()
 	}
 }
+
+// makeDefaults creates a fresh configuration when loading or rendering defaults.
+func makeDefaults[T any]() any {
+	cfg := new(T)
+	setDefaults(cfg)
+
+	return cfg
+}

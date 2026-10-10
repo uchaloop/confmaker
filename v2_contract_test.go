@@ -17,10 +17,9 @@ func (s *sensitiveText) UnmarshalText(b []byte) error {
 var errSensitiveInput = errors.New("sensitive cause")
 
 func TestSensitiveTagAndMarker(t *testing.T) {
-	type config struct {
+	_, err := Load[struct {
 		Password sensitiveText `env:"PASSWORD,secret"`
-	}
-	_, err := Load[config]("app", WithEnv(map[string]string{"APP_PASSWORD": "do-not-disclose"}))
+	}]("app", WithEnv(map[string]string{"APP_PASSWORD": "do-not-disclose"}))
 	if err == nil || strings.Contains(err.Error(), "do-not-disclose") || errors.Is(err, errSensitiveInput) {
 		t.Fatalf("unsafe error: %v", err)
 	}
@@ -30,10 +29,9 @@ func TestSensitiveTagAndMarker(t *testing.T) {
 	}
 }
 func TestPointerMarkerInMap(t *testing.T) {
-	type config struct {
+	_, err := Load[struct {
 		Tokens map[string]sensitiveText `env:"TOKENS" envFormat:"json"`
-	}
-	_, err := Load[config]("app", WithEnv(map[string]string{"APP_TOKENS": `{"key":"do-not-disclose"}`}))
+	}]("app", WithEnv(map[string]string{"APP_TOKENS": `{"key":"do-not-disclose"}`}))
 	if err == nil || strings.Contains(err.Error(), "do-not-disclose") || errors.Is(err, errSensitiveInput) {
 		t.Fatalf("unsafe error: %v", err)
 	}
@@ -42,10 +40,9 @@ func TestPointerMarkerInMap(t *testing.T) {
 	}
 }
 func TestSupportedPointerBoundary(t *testing.T) {
-	type config struct {
+	_, err := Load[struct {
 		Value **int `env:"VALUE"`
-	}
-	_, err := Load[config]("app", WithEnv(nil))
+	}]("app", WithEnv(nil))
 	if err == nil {
 		t.Fatal("pointer chains must be rejected")
 	}

@@ -98,13 +98,29 @@ func (l *Loader) Manifest(opts ...ManifestOption) (ManifestResult, error) {
 
 	result := ManifestResult{Configs: make([]ConfigManifest, 0, len(descriptors))}
 	for _, d := range descriptors {
-		config := ConfigManifest{InstanceName: d.instanceName, Prefix: d.prefix, Variables: make([]Variable, 0, len(d.fields))}
+		config := ConfigManifest{
+			InstanceName: d.instanceName,
+			Prefix:       d.prefix,
+			Variables:    make([]Variable, 0, len(d.fields)),
+		}
 		for _, f := range d.fields {
 			state := DefaultNotEvaluated
 			if f.Secret {
 				state = DefaultRedacted
 			}
-			config.Variables = append(config.Variables, Variable{Name: f.Name, FieldPath: f.field, Description: f.Description, Type: f.Type, Required: f.Required, NotEmpty: f.NotEmpty, Secret: f.Secret, Format: f.format, Separator: f.separator, KeyValSeparator: f.keyValSeparator, Default: DefaultInfo{State: state}})
+			config.Variables = append(config.Variables, Variable{
+				Name:            f.Name,
+				FieldPath:       f.field,
+				Description:     f.Description,
+				Type:            f.Type,
+				Required:        f.Required,
+				NotEmpty:        f.NotEmpty,
+				Secret:          f.Secret,
+				Format:          f.format,
+				Separator:       f.separator,
+				KeyValSeparator: f.keyValSeparator,
+				Default:         DefaultInfo{State: state},
+			})
 		}
 
 		if settings.defaults {

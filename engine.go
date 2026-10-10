@@ -58,12 +58,7 @@ func nilEngineValue(engine Engine) bool {
 func makeEngineDescriptor[T any](name string, opts []ConfigOption) (descriptor, error) {
 	d := descriptor{
 		instanceName: name,
-		defaults: func() any {
-			cfg := new(T)
-			setDefaults(cfg)
-
-			return cfg
-		},
+		defaults:     makeDefaults[T],
 	}
 
 	if name == "" {
@@ -146,11 +141,8 @@ func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *L
 		}
 
 		err := r.fillEngine(ctx, l.env.engine, configs[i])
-		if report != nil && (err == nil || ctx.Err() == nil || !errors.Is(err, ctx.Err())) {
-			report.Configs[i].Status = ConfigSucceeded
-			if err != nil {
-				report.Configs[i].Status = ConfigFailed
-			}
+		if report != nil {
+			setConfigReportStatus(&report.Configs[i], ctx, err)
 		}
 
 		if err != nil {

@@ -2,16 +2,16 @@ package confexport
 
 import (
 	"fmt"
-	c "github.com/uchaloop/confmaker/v2"
 	"io"
 	"strings"
+
+	c "github.com/uchaloop/confmaker/v2"
 )
 
 // WriteMarkdown writes a prepared manifest as escaped Markdown tables.
 // Unrenderable defaults are marked; no user methods or ENV reads occur.
 // Writer errors may leave partial output.
 func WriteMarkdown(writer io.Writer, configs c.ManifestResult) error {
-
 	var output strings.Builder
 	output.WriteString("# Configuration manifest\n")
 	for _, config := range configs.Configs {
