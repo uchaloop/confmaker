@@ -75,7 +75,12 @@ func WriteJSON(writer io.Writer, configs c.ManifestResult) error {
 	}
 
 	for _, p := range configs.Problems {
-		document.Problems = append(document.Problems, problemJSON{p.Kind, p.InstanceName, p.VariableName, p.FieldPath})
+		document.Problems = append(document.Problems, problemJSON{
+			Kind:         p.Kind,
+			InstanceName: p.InstanceName,
+			VariableName: p.VariableName,
+			FieldPath:    p.FieldPath,
+		})
 	}
 
 	data, err := json.Marshal(document, jsontext.WithIndent("  "))

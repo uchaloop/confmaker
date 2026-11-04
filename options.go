@@ -31,21 +31,21 @@ type LoaderOption interface {
 // configSettings holds the resolved options of one config.
 type configSettings struct {
 	name, prefix string
-	prefixSet    bool
+	isPrefixSet  bool
 }
 
 // envSettings holds the resolved options of a load.
 type envSettings struct {
-	engine            Engine
-	engineSet         bool
-	engineErr         error
-	builtinOptions    bool
-	allowed           []string
-	env               environment
-	envRepeated       bool
-	diagnostics       bool
-	diagnosticHandler func(LoadReport)
-	diagnosticErr     error
+	engine               Engine
+	isEngineSet          bool
+	engineErr            error
+	isBuiltinOptionSet   bool
+	allowed              []string
+	env                  environment
+	isEnvRepeated        bool
+	isDiagnosticsEnabled bool
+	diagnosticHandler    func(LoadReport)
+	diagnosticErr        error
 }
 
 type configOption func(*configSettings)
@@ -65,7 +65,7 @@ func (envOption) loadOption()               {}
 // an underscore, for example "REPLICA_POSTGRES_".
 func WithPrefix(prefix string) ConfigOption {
 	return configOption(func(s *configSettings) {
-		s.prefix, s.prefixSet = prefix, true
+		s.prefix, s.isPrefixSet = prefix, true
 	})
 }
 
@@ -84,7 +84,7 @@ func AllowUnknown(prefixes ...string) LoaderOption {
 	}
 
 	return envOption(func(s *envSettings) {
-		s.builtinOptions = true
+		s.isBuiltinOptionSet = true
 		s.allowed = append(s.allowed, allowed...)
 	})
 }
@@ -109,7 +109,7 @@ func resolveSettings[T any](name string, opts []ConfigOption) (configSettings, e
 		return set, err
 	}
 
-	if !set.prefixSet {
+	if !set.isPrefixSet {
 		set.prefix = defaultPrefix(set.name)
 	}
 

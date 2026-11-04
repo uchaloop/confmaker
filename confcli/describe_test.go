@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"flag"
-	. "github.com/uchaloop/confmaker/v2"
-	"github.com/uchaloop/confmaker/v2/confexport"
 	"io"
 	"testing"
+
+	. "github.com/uchaloop/confmaker/v2"
+	"github.com/uchaloop/confmaker/v2/confexport"
 )
 
 func TestDescribeFlag(t *testing.T) {
@@ -108,14 +109,14 @@ func TestDescribe(t *testing.T) {
 			handle := loader.Register[describeConfig]("app")
 
 			var output bytes.Buffer
-			handled, err := Describe(
+			isHandled, err := Describe(
 				loader,
 				[]string{"-describe=" + format},
 				&output,
 				IncludeDefaults(),
 			)
-			if err != nil || !handled || !bytes.Contains(output.Bytes(), []byte("localhost")) {
-				t.Fatalf("description: handled=%v, err=%v, output=%s", handled, err, &output)
+			if err != nil || !isHandled || !bytes.Contains(output.Bytes(), []byte("localhost")) {
+				t.Fatalf("description: handled=%v, err=%v, output=%s", isHandled, err, &output)
 			}
 
 			if _, err := handle.Value(); !errors.Is(err, ErrNotLoaded) {
@@ -137,14 +138,14 @@ func TestDescribe(t *testing.T) {
 func TestDescribeArguments(t *testing.T) {
 	for _, args := range [][]string{nil, {"-help"}, {"-describe=xml"}, {"-unknown"}, {"extra"}, {"-describe=json", "extra"}} {
 		var output bytes.Buffer
-		handled, err := Describe(nil, args, &output)
-		wantError := len(args) > 0 && args[0] != "-help"
-		if (err != nil) != wantError {
+		isHandled, err := Describe(nil, args, &output)
+		isErrorExpected := len(args) > 0 && args[0] != "-help"
+		if (err != nil) != isErrorExpected {
 			t.Fatalf("args %v: %v", args, err)
 		}
 
-		if !wantError && handled != (len(args) > 0) {
-			t.Fatalf("args %v: handled=%v", args, handled)
+		if !isErrorExpected && isHandled != (len(args) > 0) {
+			t.Fatalf("args %v: handled=%v", args, isHandled)
 		}
 	}
 }
@@ -172,4 +173,17 @@ type describeConfig struct {
 
 func (c *describeConfig) SetDefaults() {
 	c.Host = "localhost"
+}
+
+type shortHelpWriter struct{}
+
+func (shortHelpWriter) Write(data []byte) (int, error) {
+	return len(data) / 2, nil
+}
+
+func TestDescribeHelpShortWrite(t *testing.T) {
+	isHandled, err := Describe(nil, []string{"-help"}, shortHelpWriter{})
+	if isHandled || !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("handled=%v, error=%v; want false and short write", isHandled, err)
+	}
 }

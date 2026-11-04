@@ -125,13 +125,13 @@ func TestEngineDuplicateIdentityIncludesInvalidDeclarations(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "same") || duplicateIdentityCalls != 0 {
 			t.Fatalf("builtin=%v calls=%d err=%v", builtin, duplicateIdentityCalls, err)
 		}
-		found := false
+		isFound := false
 		for _, p := range l.Report().Problems {
 			if p.Kind == ErrorConflict {
-				found = true
+				isFound = true
 			}
 		}
-		if !found {
+		if !isFound {
 			t.Fatal("missing identity conflict", l.Report())
 		}
 	}

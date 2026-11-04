@@ -43,8 +43,8 @@ func WithEnv(vars map[string]string) LoaderOption {
 	maps.Copy(env, vars)
 
 	return envOption(func(s *envSettings) {
-		s.builtinOptions = true
-		s.envRepeated = s.env != nil
+		s.isBuiltinOptionSet = true
+		s.isEnvRepeated = s.env != nil
 		s.env = env
 	})
 }

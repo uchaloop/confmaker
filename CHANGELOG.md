@@ -4,6 +4,20 @@ All notable changes to this module are documented in this file.
 
 Entries are grouped by version and change type, with the newest version first.
 
+## [2.1.1] - Unreleased
+
+### Changed
+
+- Replaced the Markdown default placeholder with an ASCII hyphen (`-`).
+
+### Fixed
+
+- Marked map defaults with non-reflexive keys, including NaN, as unrenderable
+  instead of exporting ENV text that the parser rejects.
+- Returned `io.ErrShortWrite` when help output is only partially written without
+  a writer error.
+- Included `secret` in the supported ENV tag options reported for invalid tags.
+
 ## [2.1.0] - 2026-10-10
 
 ### Added
@@ -455,3 +469,5 @@ its only dependencies.
 [0.1.0]: https://github.com/uchaloop/confmaker/releases/tag/v0.1.0
 
 [2.1.0]: https://github.com/uchaloop/confmaker/compare/v2.0.0...v2.1.0
+
+[2.1.1]: https://github.com/uchaloop/confmaker/compare/v2.1.0...HEAD

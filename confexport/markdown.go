@@ -15,7 +15,12 @@ func WriteMarkdown(writer io.Writer, configs c.ManifestResult) error {
 	var output strings.Builder
 	output.WriteString("# Configuration manifest\n")
 	for _, config := range configs.Configs {
-		fmt.Fprintf(&output, "\n## %s\n\nPrefix: %s\n\n", escapeManifestMarkdownText(config.InstanceName), manifestMarkdownCode(config.Prefix))
+		fmt.Fprintf(
+			&output,
+			"\n## %s\n\nPrefix: %s\n\n",
+			escapeManifestMarkdownText(config.InstanceName),
+			manifestMarkdownCode(config.Prefix),
+		)
 		output.WriteString("| ENV | Type | Requirement | Secret | Default | Description |\n")
 		output.WriteString("| --- | --- | --- | --- | --- | --- |\n")
 		for _, variable := range config.Variables {
@@ -31,7 +36,7 @@ func WriteMarkdown(writer io.Writer, configs c.ManifestResult) error {
 				secret = "Yes"
 			}
 
-			defaultText := "—"
+			defaultText := "-"
 			if variable.Default.State == c.DefaultUnrenderable {
 				defaultText = "Cannot render"
 			}
@@ -39,9 +44,16 @@ func WriteMarkdown(writer io.Writer, configs c.ManifestResult) error {
 				defaultText = escapeManifestMarkdownText(variable.Default.Text)
 			}
 
-			fmt.Fprintf(&output, "| %s | %s | %s | %s | %s | %s |\n",
-				manifestMarkdownCode(variable.Name), manifestMarkdownCode(variable.Type), requirement,
-				secret, defaultText, escapeManifestMarkdownText(variable.Description))
+			fmt.Fprintf(
+				&output,
+				"| %s | %s | %s | %s | %s | %s |\n",
+				manifestMarkdownCode(variable.Name),
+				manifestMarkdownCode(variable.Type),
+				requirement,
+				secret,
+				defaultText,
+				escapeManifestMarkdownText(variable.Description),
+			)
 		}
 	}
 

@@ -14,8 +14,8 @@ type fieldSpec struct {
 	Name, Type                         string
 	format, separator, keyValSeparator string
 	Description                        string
-	Required, Secret                   bool
-	NotEmpty                           bool
+	IsRequired, IsSecret               bool
+	IsNotEmpty                         bool
 	field                              string
 	index                              []int
 	render                             renderer
@@ -27,7 +27,12 @@ type fieldSpec struct {
 func prepareConfig[T any](name string, opts []ConfigOption) (configSettings, []fieldSpec, error) {
 	settings, err := resolveSettings[T](name, opts)
 	if err != nil {
-		return settings, nil, attachConfigInstance(name, makeConfigError(ErrorDeclaration, "", "", err))
+		return settings, nil, attachConfigInstance(name, makeConfigError(
+			ErrorDeclaration,
+			"",
+			"",
+			err,
+		))
 	}
 
 	fields, err := compileSchema(reflect.TypeFor[T](), settings.prefix)
@@ -54,7 +59,14 @@ func compileSchema(root reflect.Type, prefix string) ([]fieldSpec, error) {
 	// there rather than from nothing.
 	fieldSpecs := make([]fieldSpec, 0, root.NumField())
 
-	appendFields(&fieldSpecs, &errs, root, prefix, "", nil)
+	appendFields(
+		&fieldSpecs,
+		&errs,
+		root,
+		prefix,
+		"",
+		nil,
+	)
 
 	errs = append(errs, checkCollisions(fieldSpecs)...)
 
@@ -70,11 +82,18 @@ func checkCollisions(fieldSpecs []fieldSpec) []error {
 	var errs []error
 
 	for _, b := range fieldSpecs {
-		if first, taken := claimed[b.Name]; taken {
-			errs = append(errs, makeConfigError(ErrorConflict, b.Name, b.field, fmt.Errorf(
-				"variable %q is claimed by both %s and %s; give one of them an envPrefix",
-				b.Name, first, b.field,
-			)))
+		if first, isTaken := claimed[b.Name]; isTaken {
+			errs = append(errs, makeConfigError(
+				ErrorConflict,
+				b.Name,
+				b.field,
+				fmt.Errorf(
+					"variable %q is claimed by both %s and %s; give one of them an envPrefix",
+					b.Name,
+					first,
+					b.field,
+				),
+			))
 
 			continue
 		}
@@ -94,14 +113,19 @@ func appendFields(fieldSpecs *[]fieldSpec, errs *[]error, structType reflect.Typ
 		}
 
 		fieldPath := path + field.Name
-		name, suffix, hasOptions := strings.Cut(field.Tag.Get("env"), ",")
+		name, suffix, isOptionSet := strings.Cut(field.Tag.Get("env"), ",")
 		appendFieldError := func(err error) {
 			variableName := ""
 			if len(name) != 0 {
 				variableName = prefix + name
 			}
 
-			*errs = append(*errs, makeConfigError(ErrorDeclaration, variableName, fieldPath, err))
+			*errs = append(*errs, makeConfigError(
+				ErrorDeclaration,
+				variableName,
+				fieldPath,
+				err,
+			))
 		}
 		// `env:"-"` takes the field out of the config entirely, nested fields
 		// included.
@@ -109,7 +133,7 @@ func appendFields(fieldSpecs *[]fieldSpec, errs *[]error, structType reflect.Typ
 			continue
 		}
 
-		if _, declared := field.Tag.Lookup("envDefault"); declared {
+		if _, isDeclared := field.Tag.Lookup("envDefault"); isDeclared {
 			appendFieldError(fmt.Errorf(
 				"field %s declares envDefault; a default belongs in SetDefaults, where code and tests can see it",
 				fieldPath,
@@ -121,17 +145,17 @@ func appendFields(fieldSpecs *[]fieldSpec, errs *[]error, structType reflect.Typ
 		index := make([]int, len(parent)+len(field.Index))
 		copy(index, parent)
 		copy(index[len(parent):], field.Index)
-		_, prefixDeclared := field.Tag.Lookup("envPrefix")
-		_, formatDeclared := field.Tag.Lookup("envFormat")
-		_, separatorDeclared := field.Tag.Lookup("envSeparator")
-		_, keyValSeparatorDeclared := field.Tag.Lookup("envKeyValSeparator")
+		_, isPrefixDeclared := field.Tag.Lookup("envPrefix")
+		_, isFormatDeclared := field.Tag.Lookup("envFormat")
+		_, isSeparatorDeclared := field.Tag.Lookup("envSeparator")
+		_, isKeyValSeparatorDeclared := field.Tag.Lookup("envKeyValSeparator")
 
 		switch {
-		case len(name) == 0 && formatDeclared:
+		case len(name) == 0 && isFormatDeclared:
 			appendFieldError(fmt.Errorf("field %s declares envFormat but names no variable", fieldPath))
-		case len(name) == 0 && (separatorDeclared || keyValSeparatorDeclared):
+		case len(name) == 0 && (isSeparatorDeclared || isKeyValSeparatorDeclared):
 			appendFieldError(fmt.Errorf("field %s declares a separator but names no variable", fieldPath))
-		case len(name) != 0 && prefixDeclared:
+		case len(name) != 0 && isPrefixDeclared:
 			// envPrefix extends the prefix a nested struct is read under. On a
 			// field that names its own variable it reads nothing, so a prefix
 			// meant to apply would silently not.
@@ -140,28 +164,47 @@ func appendFields(fieldSpecs *[]fieldSpec, errs *[]error, structType reflect.Typ
 				fieldPath,
 			))
 		case len(name) != 0:
-			leaf, err := compileField(field, name, suffix, prefix, fieldPath, index)
+			leaf, err := compileField(
+				field,
+				name,
+				suffix,
+				prefix,
+				fieldPath,
+				index,
+			)
 			if err != nil {
-				*errs = append(*errs, makeConfigError(ErrorDeclaration, prefix+name, fieldPath, err))
+				*errs = append(*errs, makeConfigError(
+					ErrorDeclaration,
+					prefix+name,
+					fieldPath,
+					err,
+				))
 
 				continue
 			}
 
 			*fieldSpecs = append(*fieldSpecs, leaf)
-		case hasOptions:
+		case isOptionSet:
 			// A tag of options alone reads nothing. Treating it as an untagged
 			// field would drop a field its author plainly meant to configure.
 			appendFieldError(fmt.Errorf(
 				"field %s carries env options but names no variable", fieldPath,
 			))
 		case field.Type.Kind() == reflect.Struct:
-			appendFields(fieldSpecs, errs, field.Type, prefix+field.Tag.Get("envPrefix"), fieldPath+".", index)
-		case nestsConfig(field.Type):
+			appendFields(
+				fieldSpecs,
+				errs,
+				field.Type,
+				prefix+field.Tag.Get("envPrefix"),
+				fieldPath+".",
+				index,
+			)
+		case isNestedConfig(field.Type):
 			appendFieldError(fmt.Errorf(
 				"field %s nests a config through %s; nest by value so the variables it reads are known from the type",
 				fieldPath, field.Type.Kind(),
 			))
-		case prefixDeclared:
+		case isPrefixDeclared:
 			// The field is not configuration at all: it names no variable and
 			// is not a struct to descend into, so the prefix extends nothing
 			// and the field is skipped entirely. Saying so beats dropping it.
@@ -196,37 +239,45 @@ func compileField(
 		return fieldSpec{}, fmt.Errorf("field %s reads %q, which no environment variable can be named", fieldPath, fullName)
 	}
 
-	secret := opts.secret || isSecretType(field.Type)
+	isSecret := opts.isSecret || isSecretType(field.Type)
 	codec, err := makeFieldCodec(field)
 	if err != nil {
 		return fieldSpec{}, fmt.Errorf("field %s: %w", fieldPath, err)
 	}
 
 	format := field.Tag.Get("envFormat")
-	if format == "" {
+	if len(format) == 0 {
 		format = "plain"
 	}
 	sep, kv := "", ""
-	if format == "plain" && !declaresTextForm(field.Type) {
+	if format == "plain" && !isTextForm(field.Type) {
 		if field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Map {
 			sep = field.Tag.Get("envSeparator")
-			if sep == "" {
+			if len(sep) == 0 {
 				sep = defaultSeparator
 			}
 		}
 		if field.Type.Kind() == reflect.Map {
 			kv = field.Tag.Get("envKeyValSeparator")
-			if kv == "" {
+			if len(kv) == 0 {
 				kv = defaultKeyValSeparator
 			}
 		}
 	}
 	return fieldSpec{
-		format: format, separator: sep, keyValSeparator: kv,
-		Name: fullName, Type: field.Type.String(), Description: field.Tag.Get("envDescription"),
-		Required: opts.required || opts.notEmpty, NotEmpty: opts.notEmpty, Secret: secret,
-		field: fieldPath, index: index, parse: codec.parse,
-		render: codec.render,
+		format:          format,
+		separator:       sep,
+		keyValSeparator: kv,
+		Name:            fullName,
+		Type:            field.Type.String(),
+		Description:     field.Tag.Get("envDescription"),
+		IsRequired:      opts.isRequired || opts.isNotEmpty,
+		IsNotEmpty:      opts.isNotEmpty,
+		IsSecret:        isSecret,
+		field:           fieldPath,
+		index:           index,
+		parse:           codec.parse,
+		render:          codec.render,
 	}, nil
 }
 
@@ -234,10 +285,24 @@ func compileField(
 // validates the result. Validate runs only when every variable parsed: a
 // half-filled config would report problems that are not there.
 func applyAndValidate[T any](cfg *T, fields []fieldSpec, name string, env environment, report *ConfigReport, onPanic func(error)) error {
-	return applyAndValidateContext(context.Background(), cfg, fields, name, env, report, onPanic)
+	return applyAndValidateContext(
+		context.Background(),
+		cfg,
+		fields,
+		name,
+		env,
+		report,
+		onPanic,
+	)
 }
 func applyAndValidateContext[T any](ctx context.Context, cfg *T, fields []fieldSpec, name string, env environment, report *ConfigReport, onPanic func(error)) error {
-	if err := applyEnvironment(reflect.ValueOf(cfg).Elem(), fields, env, report, onPanic); err != nil {
+	if err := applyEnvironment(
+		reflect.ValueOf(cfg).Elem(),
+		fields,
+		env,
+		report,
+		onPanic,
+	); err != nil {
 		return wrapConfigError(name, err)
 	}
 
@@ -248,9 +313,14 @@ func applyAndValidateContext[T any](ctx context.Context, cfg *T, fields []fieldS
 	// Check cfg (a *T), not *cfg: *T's method set includes both value- and
 	// pointer-receiver Validate methods, so a library that declares Validate on a
 	// pointer receiver is still validated.
-	if v, ok := any(cfg).(interface{ Validate() error }); ok {
+	if v, isOK := any(cfg).(interface{ Validate() error }); isOK {
 		if err := v.Validate(); err != nil {
-			return wrapConfigError(name, makeConfigError(ErrorValidation, "", "", err))
+			return wrapConfigError(name, makeConfigError(
+				ErrorValidation,
+				"",
+				"",
+				err,
+			))
 		}
 	}
 
@@ -263,23 +333,23 @@ func applyAndValidateContext[T any](ctx context.Context, cfg *T, fields []fieldS
 // established - and every problem is reported together.
 func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environment, report *ConfigReport, onPanic func(error)) error {
 	var errs []error
-	finished := false
+	isFinished := false
 	defer func() {
-		if !finished && onPanic != nil {
+		if !isFinished && onPanic != nil {
 			onPanic(errors.Join(errs...))
 		}
 	}()
 
 	for i, b := range fieldSpecs {
-		raw, set := env[b.Name]
+		raw, isSet := env[b.Name]
 		var variable *VariableReport
 		if report != nil {
 			variable = &report.Variables[i]
 			variable.Status = VariableNotProcessed
 			switch {
-			case set:
+			case isSet:
 				variable.Source = SourceEnv
-			case b.Required:
+			case b.IsRequired:
 				variable.Source = SourceMissing
 			case root.FieldByIndex(b.index).IsZero():
 				variable.Source = SourceZero
@@ -289,23 +359,33 @@ func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environmen
 		}
 
 		switch {
-		case !set && b.Required:
+		case !isSet && b.IsRequired:
 			if variable != nil {
 				variable.Status = VariableFailed
 			}
-			errs = append(errs, makeConfigError(ErrorRequired, b.Name, b.field, fmt.Errorf("required variable %q is not set", b.Name)))
+			errs = append(errs, makeConfigError(
+				ErrorRequired,
+				b.Name,
+				b.field,
+				fmt.Errorf("required variable %q is not set", b.Name),
+			))
 
 			continue
-		case !set:
+		case !isSet:
 			if variable != nil {
 				variable.Status = VariableSucceeded
 			}
 			continue
-		case b.NotEmpty && len(raw) == 0:
+		case b.IsNotEmpty && len(raw) == 0:
 			if variable != nil {
 				variable.Status = VariableFailed
 			}
-			errs = append(errs, makeConfigError(ErrorEmpty, b.Name, b.field, fmt.Errorf("variable %q is set but empty", b.Name)))
+			errs = append(errs, makeConfigError(
+				ErrorEmpty,
+				b.Name,
+				b.field,
+				fmt.Errorf("variable %q is set but empty", b.Name),
+			))
 
 			continue
 		}
@@ -328,21 +408,31 @@ func applyEnvironment(root reflect.Value, fieldSpecs []fieldSpec, env environmen
 		}
 	}
 
-	finished = true
+	isFinished = true
 	return errors.Join(errs...)
 }
 
 // describeParseError reports a value that would not parse. The value of a secret
 // is left out: the variable is named, never its contents.
 func describeParseError(b fieldSpec, err error) error {
-	if b.Secret {
-		return makeConfigError(ErrorParse, b.Name, b.field, fmt.Errorf("variable %q holds a value that is not valid for %s", b.Name, b.Type))
+	if b.IsSecret {
+		return makeConfigError(
+			ErrorParse,
+			b.Name,
+			b.field,
+			fmt.Errorf("variable %q holds a value that is not valid for %s", b.Name, b.Type),
+		)
 	}
 
-	return makeConfigError(ErrorParse, b.Name, b.field, fmt.Errorf("variable %q: %w", b.Name, err))
+	return makeConfigError(
+		ErrorParse,
+		b.Name,
+		b.field,
+		fmt.Errorf("variable %q: %w", b.Name, err),
+	)
 }
 
-// holdsSecretInCollection reports whether t is a collection of secrets. One
+// isSecretCollection reports whether t is a collection of secrets. One
 // arrives as the whole value of one variable, and inside a collection it would
 // be split on a separator it has no way to escape - so a token holding a comma
 // would become two unusable secrets. Nothing would say so either: the value a
@@ -350,7 +440,7 @@ func describeParseError(b fieldSpec, err error) error {
 //
 // isSecretType unwraps a pointer, so a collection of pointers to secrets counts
 // the same way.
-func holdsSecretInCollection(t reflect.Type) bool {
+func isSecretCollection(t reflect.Type) bool {
 	switch t.Kind() {
 	case reflect.Slice, reflect.Array:
 		return isSecretType(t.Elem())
@@ -361,29 +451,29 @@ func holdsSecretInCollection(t reflect.Type) bool {
 	}
 }
 
-// nestsConfig reports whether t reaches a config through a pointer or a
+// isNestedConfig reports whether t reaches a config through a pointer or a
 // collection - a shape whose variables cannot be known from the type alone,
 // because they depend on what is allocated or how many elements exist.
 //
 // Only a struct that names variables of its own counts. A field holding a
 // decimal, a nullable, or a timestamp reaches a struct too, and one without an
 // env tag is simply not configuration, the same as any other untagged field.
-func nestsConfig(t reflect.Type) bool {
+func isNestedConfig(t reflect.Type) bool {
 	switch t.Kind() {
 	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
-		return declaresVariables(t.Elem())
+		return isVariableDeclared(t.Elem())
 	default:
 		return false
 	}
 }
 
-// declaresVariables follows nested shapes with cycle protection. Untagged
+// isVariableDeclared follows nested shapes with cycle protection. Untagged
 // fields only count as configuration when their type graph declares ENV fields.
-func declaresVariables(t reflect.Type) bool {
-	return typeDeclaresVariables(t, make(map[reflect.Type]bool))
+func isVariableDeclared(t reflect.Type) bool {
+	return isTypeVariableDeclared(t, make(map[reflect.Type]bool))
 }
 
-func typeDeclaresVariables(t reflect.Type, seen map[reflect.Type]bool) bool {
+func isTypeVariableDeclared(t reflect.Type, seen map[reflect.Type]bool) bool {
 	if seen[t] {
 		return false
 	}
@@ -392,7 +482,7 @@ func typeDeclaresVariables(t reflect.Type, seen map[reflect.Type]bool) bool {
 
 	switch t.Kind() {
 	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
-		return typeDeclaresVariables(t.Elem(), seen)
+		return isTypeVariableDeclared(t.Elem(), seen)
 	case reflect.Struct:
 		for field := range t.Fields() {
 			if len(field.PkgPath) != 0 {
@@ -404,7 +494,7 @@ func typeDeclaresVariables(t reflect.Type, seen map[reflect.Type]bool) bool {
 				continue
 			}
 
-			if len(name) != 0 || typeDeclaresVariables(field.Type, seen) {
+			if len(name) != 0 || isTypeVariableDeclared(field.Type, seen) {
 				return true
 			}
 		}
@@ -418,13 +508,13 @@ func typeDeclaresVariables(t reflect.Type, seen map[reflect.Type]bool) bool {
 func checkPointerChains(t reflect.Type, seen map[reflect.Type]bool) error {
 	return checkENVShape(t, false, seen)
 }
-func checkENVShape(t reflect.Type, inCollection bool, seen map[reflect.Type]bool) error {
+func checkENVShape(t reflect.Type, isInCollection bool, seen map[reflect.Type]bool) error {
 	if t.Kind() == reflect.Pointer {
-		if inCollection || t.Elem().Kind() == reflect.Pointer {
+		if isInCollection || t.Elem().Kind() == reflect.Pointer {
 			return fmt.Errorf("unsupported pointer shape %s", t)
 		}
 		elem := t.Elem()
-		if declaresTextForm(elem) {
+		if isTextForm(elem) {
 			return nil
 		}
 		switch elem.Kind() {
@@ -437,7 +527,7 @@ func checkENVShape(t reflect.Type, inCollection bool, seen map[reflect.Type]bool
 		return nil
 	}
 	seen[t] = true
-	if declaresTextForm(t) {
+	if isTextForm(t) {
 		return nil
 	}
 	switch t.Kind() {
@@ -454,9 +544,9 @@ func checkENVShape(t reflect.Type, inCollection bool, seen map[reflect.Type]bool
 
 // envTagOptions are what an env tag's comma-separated suffix carries.
 type envTagOptions struct {
-	required bool
-	notEmpty bool
-	secret   bool
+	isRequired bool
+	isNotEmpty bool
+	isSecret   bool
 }
 
 // parseEnvTagOptions reads that suffix. An option the tag does not define is an
@@ -476,14 +566,14 @@ func parseEnvTagOptions(suffix string) (envTagOptions, error) {
 		switch current {
 		case "":
 		case "secret":
-			parsed.secret = true
+			parsed.isSecret = true
 		case "required":
-			parsed.required = true
+			parsed.isRequired = true
 		case "notEmpty":
-			parsed.notEmpty = true
+			parsed.isNotEmpty = true
 		default:
 			errs = append(errs, fmt.Errorf(
-				"unknown env option %q; the tag takes required and notEmpty",
+				"unknown env option %q; the tag takes required, notEmpty and secret",
 				current,
 			))
 		}
@@ -504,14 +594,14 @@ type fieldCodec struct {
 // makeFieldCodec chooses how a field is read and rendered: envFormat:"json", or the
 // plain syntax with the field's separators.
 func makeFieldCodec(field reflect.StructField) (fieldCodec, error) {
-	format, explicit := field.Tag.Lookup("envFormat")
-	if explicit {
+	format, isExplicit := field.Tag.Lookup("envFormat")
+	if isExplicit {
 		if format != "json" {
 			return fieldCodec{}, fmt.Errorf("unknown envFormat %q; supported format is json", format)
 		}
 
 		for _, tag := range []string{"envSeparator", "envKeyValSeparator"} {
-			if _, exists := field.Tag.Lookup(tag); exists {
+			if _, isPresent := field.Tag.Lookup(tag); isPresent {
 				return fieldCodec{}, fmt.Errorf("envFormat json cannot be combined with %s", tag)
 			}
 		}
@@ -526,24 +616,24 @@ func makeFieldCodec(field reflect.StructField) (fieldCodec, error) {
 	}
 
 	// Lookup, not Get: an envSeparator written empty is an error, not the default.
-	separator, separatorDeclared := field.Tag.Lookup("envSeparator")
-	if !separatorDeclared {
+	separator, isSeparatorDeclared := field.Tag.Lookup("envSeparator")
+	if !isSeparatorDeclared {
 		separator = defaultSeparator
 	}
 
-	keyValSeparator, keyValSeparatorDeclared := field.Tag.Lookup("envKeyValSeparator")
-	if !keyValSeparatorDeclared {
+	keyValSeparator, isKeyValSeparatorDeclared := field.Tag.Lookup("envKeyValSeparator")
+	if !isKeyValSeparatorDeclared {
 		keyValSeparator = defaultKeyValSeparator
 	}
 
 	// A separator on a field that is not split would be ignored in silence. A
 	// type with its own text form reads the whole value, so it is not split.
-	splits := !declaresTextForm(field.Type)
-	if separatorDeclared && !(splits && (field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Map)) {
+	isSplit := !isTextForm(field.Type)
+	if isSeparatorDeclared && !(isSplit && (field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Map)) {
 		return fieldCodec{}, fmt.Errorf("envSeparator applies to a slice or map read in the plain syntax, not %s", field.Type)
 	}
 
-	if keyValSeparatorDeclared && !(splits && field.Type.Kind() == reflect.Map) {
+	if isKeyValSeparatorDeclared && !(isSplit && field.Type.Kind() == reflect.Map) {
 		return fieldCodec{}, fmt.Errorf("envKeyValSeparator applies to a map read in the plain syntax, not %s", field.Type)
 	}
 

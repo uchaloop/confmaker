@@ -181,14 +181,14 @@ func TestLoadContextBuiltinCanceledBeforeValidate(t *testing.T) {
 }
 
 func TestLoadContextCancellationReportBoundaries(t *testing.T) {
-	for _, builtin := range []bool{false, true} {
+	for _, isBuiltin := range []bool{false, true} {
 		for _, stage := range []string{"defaults", "validation"} {
-			t.Run(fmt.Sprintf("builtin=%v/%s", builtin, stage), func(t *testing.T) {
+			t.Run(fmt.Sprintf("builtin=%v/%s", isBuiltin, stage), func(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
 				stageCancel = cancel
 				opts := []LoaderOption{WithDiagnostics()}
-				if builtin {
+				if isBuiltin {
 					opts = append(opts, WithEnv(nil))
 				} else {
 					opts = append(opts, WithEngine(EngineFunc(func(context.Context, LoadRequest) error { return nil })))

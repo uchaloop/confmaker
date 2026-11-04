@@ -135,7 +135,7 @@ func TestStructuredParseCauseAndSecret(t *testing.T) {
 		t.Fatal("ordinary parse cause lost")
 	}
 
-	field.Secret = true
+	field.IsSecret = true
 	err = wrapConfigError("app", describeParseError(field, cause))
 	if errors.Is(err, cause) {
 		t.Fatal("secret parse cause exposed")

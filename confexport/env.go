@@ -36,7 +36,12 @@ func WriteEnvExample(writer io.Writer, manifest c.ManifestResult) error {
 			case !isEnvExampleVariableName(variable.Name):
 				fmt.Fprintf(&output, "# Variable %q: set through your environment.\n", variable.Name)
 			case !variable.Secret && (variable.Default.State == c.DefaultRendered) && isEnvExampleDefaultSafe(variable.Default.Text):
-				fmt.Fprintf(&output, "%s=%s\n", variable.Name, variable.Default.Text)
+				fmt.Fprintf(
+					&output,
+					"%s=%s\n",
+					variable.Name,
+					variable.Default.Text,
+				)
 			default:
 				fmt.Fprintf(&output, "# %s=\n", variable.Name)
 			}

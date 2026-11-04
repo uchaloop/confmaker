@@ -35,7 +35,7 @@ func fieldParser(t reflect.Type, separator, keyValSeparator string) (parser, err
 	}
 
 	// A named collection with UnmarshalText owns its whole syntax.
-	if declaresTextForm(t) {
+	if isTextForm(t) {
 		return parseText, nil
 	}
 
@@ -48,7 +48,7 @@ func fieldParser(t reflect.Type, separator, keyValSeparator string) (parser, err
 
 // scalarParser returns the parser for a single value.
 func scalarParser(t reflect.Type) (parser, error) {
-	if declaresTextForm(t) {
+	if isTextForm(t) {
 		return parseText, nil
 	}
 
@@ -173,8 +173,8 @@ func mapParser(t reflect.Type, separator, keyValSeparator string) (parser, error
 		key, value := reflect.New(t.Key()).Elem(), reflect.New(t.Elem()).Elem()
 
 		for entry := range strings.SplitSeq(raw, separator) {
-			rawKey, rawValue, found := strings.Cut(entry, keyValSeparator)
-			if !found {
+			rawKey, rawValue, isFound := strings.Cut(entry, keyValSeparator)
+			if !isFound {
 				return fmt.Errorf("entry %q has no %q separating key from value", entry, keyValSeparator)
 			}
 
@@ -216,7 +216,7 @@ func mapParser(t reflect.Type, separator, keyValSeparator string) (parser, error
 }
 
 func parseText(target reflect.Value, raw string) error {
-	// declaresTextForm established the method set, so the assertion holds. It is
+	// isTextForm established the method set, so the assertion holds. It is
 	// made on the reflect.Value itself rather than on what Interface returns,
 	// which is the same method set the parser was chosen from.
 	unmarshaler, _ := reflect.TypeAssert[encoding.TextUnmarshaler](target.Addr())
@@ -231,12 +231,12 @@ func parseString(target reflect.Value, raw string) error {
 }
 
 func parseBool(target reflect.Value, raw string) error {
-	parsed, err := strconv.ParseBool(raw)
+	isParsed, err := strconv.ParseBool(raw)
 	if err != nil {
-		return makeScalarParseError(err, "%q is not a boolean", raw)
+		return makeScalarParseErrorf(err, "%q is not a boolean", raw)
 	}
 
-	target.SetBool(parsed)
+	target.SetBool(isParsed)
 
 	return nil
 }
@@ -244,7 +244,12 @@ func parseBool(target reflect.Value, raw string) error {
 func parseInt(target reflect.Value, raw string) error {
 	parsed, err := strconv.ParseInt(raw, 10, target.Type().Bits())
 	if err != nil {
-		return makeScalarParseError(err, "%q is not %s", raw, target.Type())
+		return makeScalarParseErrorf(
+			err,
+			"%q is not %s",
+			raw,
+			target.Type(),
+		)
 	}
 
 	target.SetInt(parsed)
@@ -255,7 +260,12 @@ func parseInt(target reflect.Value, raw string) error {
 func parseUint(target reflect.Value, raw string) error {
 	parsed, err := strconv.ParseUint(raw, 10, target.Type().Bits())
 	if err != nil {
-		return makeScalarParseError(err, "%q is not %s", raw, target.Type())
+		return makeScalarParseErrorf(
+			err,
+			"%q is not %s",
+			raw,
+			target.Type(),
+		)
 	}
 
 	target.SetUint(parsed)
@@ -266,7 +276,12 @@ func parseUint(target reflect.Value, raw string) error {
 func parseFloat(target reflect.Value, raw string) error {
 	parsed, err := strconv.ParseFloat(raw, target.Type().Bits())
 	if err != nil {
-		return makeScalarParseError(err, "%q is not %s", raw, target.Type())
+		return makeScalarParseErrorf(
+			err,
+			"%q is not %s",
+			raw,
+			target.Type(),
+		)
 	}
 
 	target.SetFloat(parsed)
@@ -277,7 +292,7 @@ func parseFloat(target reflect.Value, raw string) error {
 func parseDuration(target reflect.Value, raw string) error {
 	parsed, err := time.ParseDuration(raw)
 	if err != nil {
-		return makeScalarParseError(err, "%q is not a duration such as \"30s\" or \"5m\"", raw)
+		return makeScalarParseErrorf(err, "%q is not a duration such as \"30s\" or \"5m\"", raw)
 	}
 
 	target.SetInt(int64(parsed))
@@ -285,10 +300,10 @@ func parseDuration(target reflect.Value, raw string) error {
 	return nil
 }
 
-// declaresTextForm reports whether a value of type t decodes itself from text.
+// isTextForm reports whether a value of type t decodes itself from text.
 // The method set of *T is checked, not T's, because UnmarshalText has to take a
 // pointer to have anything to assign to.
-func declaresTextForm(t reflect.Type) bool {
+func isTextForm(t reflect.Type) bool {
 	return reflect.PointerTo(t).Implements(textUnmarshalerType)
 }
 
@@ -329,7 +344,7 @@ func addressableValue(value reflect.Value) reflect.Value {
 func textOf(value reflect.Value) (string, bool, error) {
 	value = addressableValue(value)
 
-	if marshaler, ok := reflect.TypeAssert[encoding.TextMarshaler](value.Addr()); ok {
+	if marshaler, isOK := reflect.TypeAssert[encoding.TextMarshaler](value.Addr()); isOK {
 		text, err := marshaler.MarshalText()
 		if err != nil {
 			return string(text), true, err
@@ -353,8 +368,8 @@ func renderValue(value reflect.Value, separator, keyValSeparator string) (string
 		return renderValue(value.Elem(), separator, keyValSeparator)
 	}
 
-	if declaresTextForm(value.Type()) {
-		if text, ok, err := textOf(value); ok {
+	if isTextForm(value.Type()) {
+		if text, isOK, err := textOf(value); isOK {
 			if err != nil {
 				return text, err
 			}
@@ -379,7 +394,12 @@ func renderValue(value reflect.Value, separator, keyValSeparator string) (string
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return strconv.FormatUint(value.Uint(), 10), nil
 	case reflect.Float32, reflect.Float64:
-		return strconv.FormatFloat(value.Float(), 'g', -1, value.Type().Bits()), nil
+		return strconv.FormatFloat(
+			value.Float(),
+			'g',
+			-1,
+			value.Type().Bits(),
+		), nil
 	case reflect.Slice:
 		parts := make([]string, value.Len())
 		for i := range parts {
@@ -389,7 +409,7 @@ func renderValue(value reflect.Value, separator, keyValSeparator string) (string
 				return "", fmt.Errorf("element %d: %w", i, err)
 			}
 
-			if hasNilPointer(value.Index(i)) {
+			if isNilPointer(value.Index(i)) {
 				return "", fmt.Errorf("element %d: a nil pointer cannot be represented in an ENV collection", i)
 			}
 		}
@@ -402,9 +422,9 @@ func renderValue(value reflect.Value, separator, keyValSeparator string) (string
 	}
 }
 
-// hasNilPointer checks every pointer in a collection element's chain. ENV
+// isNilPointer checks every pointer in a collection element's chain. ENV
 // parsing allocates the entire chain, so an inner nil cannot round-trip either.
-func hasNilPointer(value reflect.Value) bool {
+func isNilPointer(value reflect.Value) bool {
 	for value.Kind() == reflect.Pointer {
 		if value.IsNil() {
 			return true
@@ -433,7 +453,11 @@ func renderMap(value reflect.Value, separator, keyValSeparator string) (string, 
 	iter := value.MapRange()
 	for iter.Next() {
 		key, item := iter.Key(), iter.Value()
-		if hasNilPointer(key) || hasNilPointer(item) {
+		if !key.Equal(key) {
+			return "", errors.New("a map key unequal to itself cannot be represented in ENV")
+		}
+
+		if isNilPointer(key) || isNilPointer(item) {
 			return "", errors.New("a nil pointer cannot be represented in an ENV map")
 		}
 
@@ -456,8 +480,8 @@ func renderMap(value reflect.Value, separator, keyValSeparator string) (string, 
 		}
 
 		entry := k + keyValSeparator + v
-		parsedKey, parsedValue, found := strings.Cut(entry, keyValSeparator)
-		if !found || parsedKey != k || parsedValue != v {
+		parsedKey, parsedValue, isFound := strings.Cut(entry, keyValSeparator)
+		if !isFound || parsedKey != k || parsedValue != v {
 			return "", fmt.Errorf("map entry cannot be represented with envKeyValSeparator %q", keyValSeparator)
 		}
 
@@ -470,7 +494,7 @@ func renderMap(value reflect.Value, separator, keyValSeparator string) (string, 
 	seen := make(map[string]struct{}, len(parts))
 	for _, part := range parts {
 		key, _, _ := strings.Cut(part, keyValSeparator)
-		if _, ok := seen[key]; ok {
+		if _, isOK := seen[key]; isOK {
 			return "", errors.New("map keys have duplicate ENV text representations")
 		}
 

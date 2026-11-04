@@ -219,7 +219,7 @@ func TestManifestListsNestedAndEmbeddedFields(t *testing.T) {
 	}
 
 	for _, want := range []string{"CONFXAPP_SHARED", "CONFXAPP_HOST", "CONFXAPP_POOL_MAX_CONNS", "CONFXAPP_PASSWORD"} {
-		if _, ok := got[want]; !ok {
+		if _, isOK := got[want]; !isOK {
 			t.Errorf("the walk did not report %q, got %v", want, keys(got))
 		}
 	}

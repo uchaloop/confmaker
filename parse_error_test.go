@@ -37,7 +37,7 @@ func TestScalarParseErrorsPreserveCause(t *testing.T) {
 				t.Fatalf("message or cause lost: %v", err)
 			}
 
-			secretError := describeParseError(fieldSpec{Name: "APP_SECRET", Type: test.target.String(), Secret: true}, err)
+			secretError := describeParseError(fieldSpec{Name: "APP_SECRET", Type: test.target.String(), IsSecret: true}, err)
 			if errors.As(secretError, &numberError) || errors.Is(secretError, test.cause) || strings.Contains(secretError.Error(), test.raw) {
 				t.Fatalf("secret cause exposed: %v", secretError)
 			}
