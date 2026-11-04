@@ -136,3 +136,49 @@ func TestEngineDuplicateIdentityIncludesInvalidDeclarations(t *testing.T) {
 		}
 	}
 }
+
+type engineValidationConfig struct {
+	cause error
+}
+
+func (c *engineValidationConfig) Validate() error {
+	return c.cause
+}
+
+func TestEngineValidationError(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("invalid configuration")
+	calls := 0
+	loader := MakeLoader(WithEngine(EngineFunc(func(_ context.Context, req LoadRequest) error {
+		calls++
+		cfg, isOK := req.Target.(*engineValidationConfig)
+		if !isOK {
+			t.Fatalf("unexpected target type: %T", req.Target)
+		}
+
+		cfg.cause = cause
+
+		return nil
+	})))
+	handle := loader.Register[engineValidationConfig]("app")
+
+	err := loader.Load()
+	if !errors.Is(err, cause) {
+		t.Fatalf("validation cause lost: %v", err)
+	}
+
+	var problem *ConfigError
+	if !errors.As(err, &problem) || problem.Kind != ErrorValidation || problem.InstanceName != "app" {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+
+	cfg, err := handle.Value()
+	if !errors.Is(err, cause) || cfg.cause != nil {
+		t.Fatalf("failed configuration exposed: %+v, %v", cfg, err)
+	}
+
+	if err := loader.Load(); !errors.Is(err, cause) || calls != 1 {
+		t.Fatalf("load result was not retained: calls=%d, error=%v", calls, err)
+	}
+}
