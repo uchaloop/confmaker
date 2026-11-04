@@ -4,7 +4,7 @@ All notable changes to this module are documented in this file.
 
 Entries are grouped by version and change type, with the newest version first.
 
-## [2.1.1] - Unreleased
+## [2.1.1] - 2026-11-04
 
 ### Changed
 
