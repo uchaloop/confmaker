@@ -5,10 +5,11 @@ import (
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
-	. "github.com/uchaloop/confmaker/v2"
 	"io"
 	"strings"
 	"testing"
+
+	. "github.com/uchaloop/confmaker/v2"
 )
 
 func TestWriteManifestJSON(t *testing.T) {
@@ -46,7 +47,7 @@ func TestWriteManifestJSON(t *testing.T) {
 		t.Fatalf("host: %#v", fields[0])
 	}
 
-	if _, exists := fields[3]["default"].(map[string]any)["text"]; exists {
+	if _, isPresent := fields[3]["default"].(map[string]any)["text"]; isPresent {
 		t.Fatal("secret default key present")
 	}
 
@@ -81,8 +82,8 @@ func TestWriteManifestMarkdown(t *testing.T) {
 
 	for _, text := range []string{
 		"## app\n", "Prefix: `APP_`", "Required, non-empty", "API address<br>Use the staging endpoint",
-		"| `APP_TOKEN` | `testsecret.Secret` | Required | Yes | — |",
-		"| `APP_COUNT` | `int` | Optional | No | — |",
+		"| `APP_TOKEN` | `testsecret.Secret` | Required | Yes | - |",
+		"| `APP_COUNT` | `int` | Optional | No | - |",
 	} {
 		if !strings.Contains(output.String(), text) {
 			t.Fatalf("missing %q:\n%s", text, &output)
@@ -161,7 +162,7 @@ func ExampleWriteMarkdown() {
 	//
 	// | ENV | Type | Requirement | Secret | Default | Description |
 	// | --- | --- | --- | --- | --- | --- |
-	// | `API_URL` | `string` | Required, non-empty | No | — | Service endpoint |
+	// | `API_URL` | `string` | Required, non-empty | No | - | Service endpoint |
 }
 
 func TestManifestExportRetainsSchema(t *testing.T) {

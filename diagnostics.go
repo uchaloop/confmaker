@@ -108,15 +108,15 @@ type LoadProblem struct {
 func (l *Loader) Report() LoadReport {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if !l.env.diagnostics {
+	if !l.env.isDiagnosticsEnabled {
 		return LoadReport{State: LoadDisabled}
 	}
 
-	if l.state == loading {
+	if l.state == loadActive {
 		return LoadReport{State: LoadInProgress}
 	}
 
-	if l.report.State == "" {
+	if len(l.report.State) == 0 {
 		return LoadReport{State: LoadNotStarted}
 	}
 
@@ -137,7 +137,7 @@ func cloneLoadReport(report LoadReport) LoadReport {
 // WithDiagnostics enables collection of value-free reports on the loader.
 // Repeated use is harmless.
 func WithDiagnostics() LoaderOption {
-	return envOption(func(s *envSettings) { s.diagnostics = true })
+	return envOption(func(s *envSettings) { s.isDiagnosticsEnabled = true })
 }
 
 // WithDiagnosticHandler enables collection and calls handler synchronously once
@@ -150,13 +150,18 @@ func WithDiagnostics() LoaderOption {
 func WithDiagnosticHandler(handler func(LoadReport)) LoaderOption {
 	return envOption(func(s *envSettings) {
 		if handler == nil || s.diagnosticHandler != nil {
-			s.diagnosticErr = makeConfigError(ErrorDeclaration, "", "", errors.New("WithDiagnosticHandler requires one non-nil handler"))
+			s.diagnosticErr = makeConfigError(
+				ErrorDeclaration,
+				"",
+				"",
+				errors.New("WithDiagnosticHandler requires one non-nil handler"),
+			)
 
 			return
 		}
 
 		s.diagnosticHandler = handler
-		s.diagnostics = true
+		s.isDiagnosticsEnabled = true
 	})
 }
 
@@ -200,7 +205,7 @@ func makeLoadReport(registrations []*registration) *LoadReport {
 func setLoadReportState(report *LoadReport, err error) {
 	if err != ErrLoadPanicked {
 		for _, p := range report.Problems {
-			if p.InstanceName != "" {
+			if len(p.InstanceName) != 0 {
 				for i := range report.Configs {
 					if report.Configs[i].InstanceName == p.InstanceName {
 						report.Configs[i].Status = ConfigFailed

@@ -91,8 +91,13 @@ func Describe(source ManifestSource, args []string, writer io.Writer, opts ...c.
 		flags.SetOutput(&help)
 		flags.PrintDefaults()
 
-		if _, err := writer.Write(help.Bytes()); err != nil {
+		n, err := writer.Write(help.Bytes())
+		if err != nil {
 			return false, err
+		}
+
+		if n != help.Len() {
+			return false, io.ErrShortWrite
 		}
 
 		return true, nil

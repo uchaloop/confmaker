@@ -33,15 +33,15 @@ func (f EngineFunc) Load(ctx context.Context, req LoadRequest) error { return f(
 // their sanitization is the backend's responsibility.
 func WithEngine(engine Engine) LoaderOption {
 	return envOption(func(s *envSettings) {
-		if s.engineSet || nilEngineValue(engine) {
+		if s.isEngineSet || isNilEngineValue(engine) {
 			s.engineErr = errors.New("WithEngine requires one non-nil engine")
 		}
-		s.engineSet = true
+		s.isEngineSet = true
 		s.engine = engine
 	})
 }
 
-func nilEngineValue(engine Engine) bool {
+func isNilEngineValue(engine Engine) bool {
 	if engine == nil {
 		return true
 	}
@@ -61,16 +61,31 @@ func makeEngineDescriptor[T any](name string, opts []ConfigOption) (descriptor, 
 		defaults:     makeDefaults[T],
 	}
 
-	if name == "" {
-		return d, makeConfigError(ErrorDeclaration, "", "", errors.New("an instance name is required"))
+	if len(name) == 0 {
+		return d, makeConfigError(
+			ErrorDeclaration,
+			"",
+			"",
+			errors.New("an instance name is required"),
+		)
 	}
 
 	if reflect.TypeFor[T]().Kind() != reflect.Struct {
-		return d, makeConfigError(ErrorDeclaration, "", "", errors.New("configuration must be a struct"))
+		return d, makeConfigError(
+			ErrorDeclaration,
+			"",
+			"",
+			errors.New("configuration must be a struct"),
+		)
 	}
 
 	if len(opts) != 0 {
-		return d, makeConfigError(ErrorDeclaration, "", "", errors.New("configuration options require the built-in engine"))
+		return d, makeConfigError(
+			ErrorDeclaration,
+			"",
+			"",
+			errors.New("configuration options require the built-in engine"),
+		)
 	}
 
 	return d, nil
@@ -94,7 +109,7 @@ func (l *Loader) loadEngine(ctx context.Context, regs []*registration, report *L
 		errs = append(errs, l.env.engineErr)
 	}
 
-	if l.env.builtinOptions {
+	if l.env.isBuiltinOptionSet {
 		errs = append(errs, errors.New("ENV options require the built-in engine"))
 	}
 
@@ -160,7 +175,12 @@ func checkIdentityConflicts(regs []*registration) error {
 	var errs []error
 	for _, r := range regs {
 		if seen[r.name] {
-			errs = append(errs, wrapConfigError(r.name, makeConfigError(ErrorConflict, "", "", fmt.Errorf("instance name %q is registered more than once", r.name))))
+			errs = append(errs, wrapConfigError(r.name, makeConfigError(
+				ErrorConflict,
+				"",
+				"",
+				fmt.Errorf("instance name %q is registered more than once", r.name),
+			)))
 		}
 		seen[r.name] = true
 	}

@@ -43,7 +43,7 @@ type ManifestOption interface {
 	applyManifest(*manifestSettings)
 }
 
-type manifestSettings struct{ defaults bool }
+type manifestSettings struct{ isDefaultsIncluded bool }
 type manifestOption func(*manifestSettings)
 
 func (manifestOption) describeOption()                     {}
@@ -53,7 +53,7 @@ func (o manifestOption) applyManifest(s *manifestSettings) { o(s) }
 // and renders nonzero values. Sensitive fields remain redacted and are never
 // marshaled. User panics propagate without changing the loader's load state.
 func IncludeDefaults() ManifestOption {
-	return manifestOption(func(s *manifestSettings) { s.defaults = true })
+	return manifestOption(func(s *manifestSettings) { s.isDefaultsIncluded = true })
 }
 
 // Manifest returns ErrManifestUnsupported for custom engines without calling user code.
@@ -64,13 +64,18 @@ func IncludeDefaults() ManifestOption {
 // error. Loaded values are never used. Concurrent calls with IncludeDefaults
 // require user defaults and marshalers to support concurrent invocation.
 func (l *Loader) Manifest(opts ...ManifestOption) (ManifestResult, error) {
-	if l.env.engineSet {
+	if l.env.isEngineSet {
 		return ManifestResult{}, ErrManifestUnsupported
 	}
 	var settings manifestSettings
 	for _, o := range opts {
 		if o == nil {
-			return ManifestResult{}, makeConfigError(ErrorDeclaration, "", "", errors.New("nil manifest option"))
+			return ManifestResult{}, makeConfigError(
+				ErrorDeclaration,
+				"",
+				"",
+				errors.New("nil manifest option"),
+			)
 		}
 		o.applyManifest(&settings)
 	}
@@ -105,7 +110,7 @@ func (l *Loader) Manifest(opts ...ManifestOption) (ManifestResult, error) {
 		}
 		for _, f := range d.fields {
 			state := DefaultNotEvaluated
-			if f.Secret {
+			if f.IsSecret {
 				state = DefaultRedacted
 			}
 			config.Variables = append(config.Variables, Variable{
@@ -113,9 +118,9 @@ func (l *Loader) Manifest(opts ...ManifestOption) (ManifestResult, error) {
 				FieldPath:       f.field,
 				Description:     f.Description,
 				Type:            f.Type,
-				Required:        f.Required,
-				NotEmpty:        f.NotEmpty,
-				Secret:          f.Secret,
+				Required:        f.IsRequired,
+				NotEmpty:        f.IsNotEmpty,
+				Secret:          f.IsSecret,
 				Format:          f.format,
 				Separator:       f.separator,
 				KeyValSeparator: f.keyValSeparator,
@@ -123,7 +128,7 @@ func (l *Loader) Manifest(opts ...ManifestOption) (ManifestResult, error) {
 			})
 		}
 
-		if settings.defaults {
+		if settings.isDefaultsIncluded {
 			result.Problems = append(result.Problems, evaluateDefaults(d, config.Variables)...)
 		}
 		result.Configs = append(result.Configs, config)
@@ -145,7 +150,12 @@ func Manifest[T any](name string, opts ...DescribeOption) (ManifestResult, error
 		case ManifestOption:
 			manifests = append(manifests, o)
 		default:
-			return ManifestResult{}, makeConfigError(ErrorDeclaration, "", "", errors.New("nil description option"))
+			return ManifestResult{}, makeConfigError(
+				ErrorDeclaration,
+				"",
+				"",
+				errors.New("nil description option"),
+			)
 		}
 	}
 

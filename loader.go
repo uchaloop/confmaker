@@ -41,8 +41,8 @@ type Loader struct {
 type loaderState int
 
 const (
-	registering loaderState = iota
-	loading
+	registrationOpen loaderState = iota
+	loadActive
 	loaded
 )
 
@@ -76,7 +76,12 @@ func MakeLoader(opts ...LoaderOption) *Loader {
 	l := &Loader{}
 	for _, opt := range opts {
 		if opt == nil {
-			l.envErr = makeConfigError(ErrorDeclaration, "", "", errors.New("a load option must not be nil"))
+			l.envErr = makeConfigError(
+				ErrorDeclaration,
+				"",
+				"",
+				errors.New("a load option must not be nil"),
+			)
 
 			continue
 		}
@@ -103,16 +108,16 @@ func MakeLoader(opts ...LoaderOption) *Loader {
 func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
 	// A late registration runs no user code.
 	l.mu.Lock()
-	open := l.state == registering
+	isOpen := l.state == registrationOpen
 	l.mu.Unlock()
 
-	if !open {
+	if !isOpen {
 		return &Handle[T]{err: ErrRegisteredAfterLoad}
 	}
 
 	// Resolve the registration without holding the lock.
 	r := &registration{typeName: reflect.TypeFor[T]().String(), name: name}
-	if l.env.engineSet {
+	if l.env.isEngineSet {
 		r.descriptor, r.err = makeEngineDescriptor[T](name, opts)
 	} else {
 		r.descriptor, r.err = makeDescriptor[T](name, opts)
@@ -129,9 +134,14 @@ func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if v, ok := any(cfg).(interface{ Validate() error }); ok {
+			if v, isOK := any(cfg).(interface{ Validate() error }); isOK {
 				if err := v.Validate(); err != nil {
-					return wrapConfigError(name, makeConfigError(ErrorValidation, "", "", err))
+					return wrapConfigError(name, makeConfigError(
+						ErrorValidation,
+						"",
+						"",
+						err,
+					))
 				}
 			}
 			*value = *cfg
@@ -143,7 +153,15 @@ func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
 			if loadReport != nil {
 				onPanic = func(err error) { recordLoadProblems(loadReport, wrapConfigError(r.instanceName, err)) }
 			}
-			if err := applyAndValidateContext(ctx, cfg, r.fields, r.instanceName, env, report, onPanic); err != nil {
+			if err := applyAndValidateContext(
+				ctx,
+				cfg,
+				r.fields,
+				r.instanceName,
+				env,
+				report,
+				onPanic,
+			); err != nil {
 				return err
 			}
 
@@ -157,7 +175,7 @@ func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
 	defer l.mu.Unlock()
 
 	// Load may have started while the registration was resolved.
-	if l.state != registering {
+	if l.state != registrationOpen {
 		return &Handle[T]{err: ErrRegisteredAfterLoad}
 	}
 
@@ -192,7 +210,7 @@ func (l *Loader) LoadContext(ctx context.Context) error {
 	case loaded:
 		defer l.mu.Unlock()
 		return l.err
-	case loading:
+	case loadActive:
 		done := l.done
 		l.mu.Unlock()
 		select {
@@ -213,17 +231,17 @@ func (l *Loader) LoadContext(ctx context.Context) error {
 		return err
 	}
 
-	l.state = loading
+	l.state = loadActive
 	l.done = make(chan struct{})
 	registrations := slices.Clone(l.registrations)
 	l.mu.Unlock()
 
 	sortRegistrations(registrations)
 	var report *LoadReport
-	if l.env.diagnostics {
+	if l.env.isDiagnosticsEnabled {
 		report = makeLoadReport(registrations)
 		report.DetailLevel = DetailField
-		if l.env.engineSet {
+		if l.env.isEngineSet {
 			report.DetailLevel = DetailConfig
 		}
 		l.mu.Lock()
@@ -384,7 +402,7 @@ func makeDescriptor[T any](name string, opts []ConfigOption) (descriptor, error)
 // load processes valid registrations and accumulates errors. Conflicts stop the
 // load before defaults; other errors do not prevent checking remaining configs.
 func (l *Loader) load(ctx context.Context, registrations []*registration, report *LoadReport) error {
-	if l.env.engineSet {
+	if l.env.isEngineSet {
 		return l.loadEngine(ctx, registrations, report)
 	}
 	var errs []error
@@ -400,8 +418,13 @@ func (l *Loader) load(ctx context.Context, registrations []*registration, report
 		errs = append(errs, l.envErr)
 	}
 
-	if l.env.envRepeated {
-		errs = append(errs, makeConfigError(ErrorDeclaration, "", "", errors.New("WithEnv is given more than once; pass one complete environment")))
+	if l.env.isEnvRepeated {
+		errs = append(errs, makeConfigError(
+			ErrorDeclaration,
+			"",
+			"",
+			errors.New("WithEnv is given more than once; pass one complete environment"),
+		))
 	}
 
 	if err := checkIdentityConflicts(registrations); err != nil {
@@ -458,7 +481,12 @@ func (l *Loader) load(ctx context.Context, registrations []*registration, report
 		}
 	}
 
-	if err := checkUnknown(descriptors, known, l.env.allowed, env); err != nil {
+	if err := checkUnknown(
+		descriptors,
+		known,
+		l.env.allowed,
+		env,
+	); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -472,7 +500,13 @@ func (l *Loader) load(ctx context.Context, registrations []*registration, report
 			configReport.Status = ConfigInterrupted
 		}
 
-		err := registrations[index].fill(ctx, configs[i], env, configReport, report)
+		err := registrations[index].fill(
+			ctx,
+			configs[i],
+			env,
+			configReport,
+			report,
+		)
 		setConfigReportStatus(configReport, ctx, err)
 
 		if err != nil {

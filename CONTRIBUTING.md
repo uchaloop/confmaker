@@ -133,6 +133,18 @@ available after a successful upload for `main`.
 - Write GoDoc for callers: describe behavior, guarantees and relevant limits.
   Internal comments should explain non-obvious reasons rather than restate code.
 
+## Public naming exceptions
+
+The existing v2 API explicitly retains `Variable.Required`, `Variable.NotEmpty`,
+`Variable.Secret`, `Handle.BelongsTo` and `confcli.DescribeFlag.Requested` as
+exceptions to the boolean `Is` prefix convention. Do not rename these members
+or add duplicate aliases solely for style. Preserve ENV tags and JSON field names.
+The internal `confexport.variableJSON` fields `Required`, `NotEmpty` and `Secret`
+also retain these names as explicit exceptions, matching the existing JSON keys
+`required`, `notEmpty` and `secret`. Other new internal boolean names follow the
+convention. `confcli.Describe` is an
+operation returning a handled flag and an error, not a state predicate.
+
 ## Compatibility and pull requests
 
 Keep each pull request focused. Explain the problem, resulting behavior and

@@ -179,7 +179,7 @@ type emptyRenderedConfig struct {
 func (c *emptyRenderedConfig) SetDefaults() { c.Value = 1 }
 func TestManifestRenderedEmptyText(t *testing.T) {
 	r, err := Manifest[emptyRenderedConfig]("app", IncludeDefaults())
-	if err != nil || r.Configs[0].Variables[0].Default.State != DefaultRendered || r.Configs[0].Variables[0].Default.Text != "" {
+	if err != nil || r.Configs[0].Variables[0].Default.State != DefaultRendered || len(r.Configs[0].Variables[0].Default.Text) != 0 {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
@@ -233,7 +233,7 @@ func TestReportReflectsPublishedLoadingState(t *testing.T) {
 	// Load publishes its lifecycle under the mutex before allocating detail slices.
 	l := MakeLoader(WithDiagnostics())
 	l.mu.Lock()
-	l.state = loading
+	l.state = loadActive
 	l.mu.Unlock()
 	if l.Report().State != LoadInProgress {
 		t.Fatal(l.Report())

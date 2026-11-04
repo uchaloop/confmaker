@@ -14,25 +14,25 @@ func TestEngineReport(t *testing.T) {
 	var l *Loader
 	e := EngineFunc(func(context.Context, LoadRequest) error {
 		r := l.Report()
-		if r.State != LoadInProgress || r.DetailLevel != "" || len(r.Configs) != 0 {
+		if r.State != LoadInProgress || len(r.DetailLevel) != 0 || len(r.Configs) != 0 {
 			t.Fatalf("%+v", r)
 		}
 		return cause
 	})
 	l = MakeLoader(WithEngine(e))
-	if r := l.Report(); r.State != LoadDisabled || r.DetailLevel != "" {
+	if r := l.Report(); r.State != LoadDisabled || len(r.DetailLevel) != 0 {
 		t.Fatal(r)
 	}
 	l = MakeLoader(WithEngine(e), WithDiagnostics())
 	l.Register[engineConfig]("service/db")
-	if r := l.Report(); r.State != LoadNotStarted || r.DetailLevel != "" {
+	if r := l.Report(); r.State != LoadNotStarted || len(r.DetailLevel) != 0 {
 		t.Fatal(r)
 	}
 	if err := l.Load(); !errors.Is(err, cause) {
 		t.Fatal(err)
 	}
 	r := l.Report()
-	if r.State != LoadFailed || r.DetailLevel != DetailConfig || len(r.Configs) != 1 || r.Configs[0].InstanceName != "service/db" || r.Configs[0].Type == "" || r.Configs[0].Status != ConfigFailed || r.Configs[0].Prefix != "" || len(r.Configs[0].Variables) != 0 {
+	if r.State != LoadFailed || r.DetailLevel != DetailConfig || len(r.Configs) != 1 || r.Configs[0].InstanceName != "service/db" || len(r.Configs[0].Type) == 0 || r.Configs[0].Status != ConfigFailed || len(r.Configs[0].Prefix) != 0 || len(r.Configs[0].Variables) != 0 {
 		t.Fatalf("%+v", r)
 	}
 	if strings.Contains(fmt.Sprint(r), cause.Error()) {

@@ -206,14 +206,14 @@ func (callbackConfig) Validate() error {
 func withinDeadline(t *testing.T, run func()) {
 	t.Helper()
 
-	finished := make(chan struct{})
+	isFinished := make(chan struct{})
 	go func() {
-		defer close(finished)
+		defer close(isFinished)
 		run()
 	}()
 
 	select {
-	case <-finished:
+	case <-isFinished:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the loader deadlocked")
 	}

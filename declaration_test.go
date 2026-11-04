@@ -431,7 +431,7 @@ func TestRequiredOptionIsSpelledRequired(t *testing.T) {
 	err := bindError[struct {
 		Host string `env:"HOST,require"`
 	}](t)
-	if !strings.Contains(err.Error(), `unknown env option "require"; the tag takes required and notEmpty`) {
+	if !strings.Contains(err.Error(), `unknown env option "require"; the tag takes required, notEmpty and secret`) {
 		t.Fatalf("got %v", err)
 	}
 }

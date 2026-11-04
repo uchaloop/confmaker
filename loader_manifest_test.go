@@ -227,3 +227,25 @@ func TestLoaderManifestSnapshotsBeforeCallingUserCode(t *testing.T) {
 		group.Wait()
 	})
 }
+
+func TestLoaderManifestNilOption(t *testing.T) {
+	t.Parallel()
+
+	loader := MakeLoader()
+	loader.Register[manifestPanicDefaults]("app")
+
+	result, err := loader.Manifest(IncludeDefaults(), nil)
+	var problem *ConfigError
+	if !errors.As(err, &problem) || problem.Kind != ErrorDeclaration {
+		t.Fatalf("expected declaration error, got %v", err)
+	}
+
+	if len(result.Configs) != 0 || len(result.Problems) != 0 {
+		t.Fatalf("invalid options returned a partial manifest: %+v", result)
+	}
+
+	result, err = loader.Manifest()
+	if err != nil || len(result.Configs) != 1 {
+		t.Fatalf("invalid options changed loader state: %+v, %v", result, err)
+	}
+}

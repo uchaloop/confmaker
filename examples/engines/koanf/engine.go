@@ -27,8 +27,8 @@ func makeEngine(documents map[string][]byte, overrides []byte) confmaker.Engine 
 			return err
 		}
 
-		document, ok := snapshot[req.Name]
-		if !ok {
+		document, isOK := snapshot[req.Name]
+		if !isOK {
 			return fmt.Errorf("no document for registration %q", req.Name)
 		}
 

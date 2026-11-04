@@ -80,7 +80,12 @@ func (e *ConfigError) Error() string {
 func (e *ConfigError) Unwrap() error { return e.err }
 
 func makeConfigError(kind ErrorKind, variableName, fieldPath string, err error) *ConfigError {
-	return &ConfigError{Kind: kind, VariableName: variableName, FieldPath: fieldPath, err: err}
+	return &ConfigError{
+		Kind:         kind,
+		VariableName: variableName,
+		FieldPath:    fieldPath,
+		err:          err,
+	}
 }
 
 // ConfigErrors returns all structured configuration problems in err, including
@@ -96,7 +101,7 @@ func ConfigErrors(err error) []*ConfigError {
 			return
 		}
 
-		if problem, ok := err.(*ConfigError); ok {
+		if problem, isOK := err.(*ConfigError); isOK {
 			if problem != nil {
 				result = append(result, problem)
 			}
@@ -124,9 +129,10 @@ func ConfigErrors(err error) []*ConfigError {
 func attachConfigInstance(name string, err error) error {
 	switch problem := err.(type) {
 	case *ConfigError:
-		copy := *problem
-		copy.InstanceName = name
-		return &copy
+		cloned := *problem
+		cloned.InstanceName = name
+
+		return &cloned
 	case interface{ Unwrap() []error }:
 		children := problem.Unwrap()
 		copies := make([]error, len(children))
@@ -147,7 +153,7 @@ type scalarParseError struct {
 	cause   error
 }
 
-func makeScalarParseError(cause error, format string, args ...any) *scalarParseError {
+func makeScalarParseErrorf(cause error, format string, args ...any) *scalarParseError {
 	return &scalarParseError{message: fmt.Sprintf(format, args...), cause: cause}
 }
 

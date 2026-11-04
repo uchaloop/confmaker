@@ -27,11 +27,11 @@ func checkUnknown(descriptors []descriptor, known map[string]string, allowed []s
 	var unknown []string
 
 	for name := range env {
-		if _, declared := known[name]; declared {
+		if _, isDeclared := known[name]; isDeclared {
 			continue
 		}
 
-		if hasAnyPrefix(name, allowed) || !hasAnyPrefix(name, prefixes) {
+		if isAnyPrefix(name, allowed) || !isAnyPrefix(name, prefixes) {
 			continue
 		}
 
@@ -89,14 +89,21 @@ func claimedVariables(descriptors []descriptor) (map[string]string, error) {
 
 	for _, d := range descriptors {
 		for _, variable := range d.fields {
-			switch first, taken := claimed[variable.Name]; {
-			case !taken:
+			switch first, isTaken := claimed[variable.Name]; {
+			case !isTaken:
 				claimed[variable.Name] = d.instanceName
 			default:
-				errs = append(errs, makeConfigError(ErrorConflict, variable.Name, "", fmt.Errorf(
-					"variable %q is read by both %q and %q; provide one config and inject it where both need it",
-					variable.Name, first, d.instanceName,
-				)))
+				errs = append(errs, makeConfigError(
+					ErrorConflict,
+					variable.Name,
+					"",
+					fmt.Errorf(
+						"variable %q is read by both %q and %q; provide one config and inject it where both need it",
+						variable.Name,
+						first,
+						d.instanceName,
+					),
+				))
 			}
 		}
 	}
@@ -119,19 +126,26 @@ func checkInstanceNamesAndPrefixes(descriptors []descriptor) error {
 	var errs []error
 
 	for _, d := range descriptors {
-		if _, exists := names[d.instanceName]; exists {
+		if _, isPresent := names[d.instanceName]; isPresent {
 			errs = append(errs, &ConfigError{Kind: ErrorConflict, InstanceName: d.instanceName, err: fmt.Errorf("instance name %q is registered more than once; give each config a distinct name", d.instanceName)})
 		}
 
 		names[d.instanceName] = struct{}{}
-		switch first, taken := owner[d.prefix]; {
-		case !taken:
+		switch first, isTaken := owner[d.prefix]; {
+		case !isTaken:
 			owner[d.prefix] = d.instanceName
 		default:
-			errs = append(errs, makeConfigError(ErrorConflict, "", "", fmt.Errorf(
-				"instances %q and %q both read the prefix %q; one of them cannot be checked for typos",
-				first, d.instanceName, d.prefix,
-			)))
+			errs = append(errs, makeConfigError(
+				ErrorConflict,
+				"",
+				"",
+				fmt.Errorf(
+					"instances %q and %q both read the prefix %q; one of them cannot be checked for typos",
+					first,
+					d.instanceName,
+					d.prefix,
+				),
+			))
 		}
 	}
 
@@ -255,7 +269,7 @@ func (e *editRows) resize(size int) {
 	e.current = e.current[:size]
 }
 
-func hasAnyPrefix(name string, prefixes []string) bool {
+func isAnyPrefix(name string, prefixes []string) bool {
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(name, prefix) {
 			return true

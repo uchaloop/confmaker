@@ -28,8 +28,8 @@ var jsonFieldOptions = json.JoinOptions(
 				}
 			}
 
-			unmarshaler, ok := target.(encoding.TextUnmarshaler)
-			if !ok {
+			unmarshaler, isOK := target.(encoding.TextUnmarshaler)
+			if !isOK {
 				return errors.ErrUnsupported
 			}
 
@@ -76,16 +76,16 @@ var jsonFieldOptions = json.JoinOptions(
 	json.WithMarshalers(json.JoinMarshalers(
 		json.MarshalToFunc[any](func(enc *jsontext.Encoder, source any) error {
 			value := reflect.ValueOf(source).Elem()
-			if !decodesJSONText(value.Type()) {
+			if !isJSONText(value.Type()) {
 				return errors.ErrUnsupported
 			}
 
-			text, ok, err := textOf(value)
+			text, isOK, err := textOf(value)
 			if err != nil {
 				return err
 			}
 
-			if !ok {
+			if !isOK {
 				return fmt.Errorf("text type %s requires encoding.TextMarshaler to render a JSON default", value.Type())
 			}
 
@@ -154,8 +154,13 @@ func describeJSONError(err error) error {
 	var syntactic *jsontext.SyntacticError
 	if errors.As(err, &syntactic) {
 		return jsonValueError{
-			message: fmt.Sprintf("invalid JSON at %s, offset %d: %v", jsonLocation(syntactic.JSONPointer), syntactic.ByteOffset, syntactic.Err),
-			err:     err,
+			message: fmt.Sprintf(
+				"invalid JSON at %s, offset %d: %v",
+				jsonLocation(syntactic.JSONPointer),
+				syntactic.ByteOffset,
+				syntactic.Err,
+			),
+			err: err,
 		}
 	}
 
@@ -169,8 +174,13 @@ func describeJSONError(err error) error {
 		}
 
 		return jsonValueError{
-			message: fmt.Sprintf("JSON at %s: %s cannot be read into %s", jsonLocation(semantic.JSONPointer), jsonKindName(semantic.JSONKind), semantic.GoType),
-			err:     err,
+			message: fmt.Sprintf(
+				"JSON at %s: %s cannot be read into %s",
+				jsonLocation(semantic.JSONPointer),
+				jsonKindName(semantic.JSONKind),
+				semantic.GoType,
+			),
+			err: err,
 		}
 	}
 
@@ -231,8 +241,8 @@ func renderJSON(value reflect.Value) (string, error) {
 
 // Inspect the complete type graph, including ignored and private fields: custom
 // marshalers may expose those. A visited set permits recursive config types.
-// decodesJSONText identifies collection elements with a scalar text form.
-func decodesJSONText(t reflect.Type) bool {
+// isJSONText identifies collection elements with a scalar text form.
+func isJSONText(t reflect.Type) bool {
 	return reflect.PointerTo(t).Implements(textUnmarshalerType)
 }
 
@@ -247,14 +257,14 @@ func checkJSONType(t reflect.Type, seen map[reflect.Type]bool) error {
 		return fmt.Errorf("JSON requires concrete types, got %s", t)
 	}
 
-	if decodesJSONText(t) {
+	if isJSONText(t) {
 		return nil
 	}
 
 	switch t.Kind() {
 	case reflect.Slice, reflect.Array:
 		// JSON carries bytes as base64 text, which nobody writes by hand.
-		if t.Elem().Kind() == reflect.Uint8 && !decodesJSONText(t.Elem()) {
+		if t.Elem().Kind() == reflect.Uint8 && !isJSONText(t.Elem()) {
 			return fmt.Errorf("JSON would read %s as base64 text; use a string", t)
 		}
 

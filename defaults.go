@@ -23,7 +23,7 @@ func evaluateDefaults(d descriptor, variables []Variable) []ManifestProblem {
 	root := reflect.ValueOf(d.defaults()).Elem()
 	var problems []ManifestProblem
 	for i, f := range d.fields {
-		if f.Secret {
+		if f.IsSecret {
 			continue
 		}
 		target := root.FieldByIndex(f.index)
@@ -34,7 +34,12 @@ func evaluateDefaults(d descriptor, variables []Variable) []ManifestProblem {
 		text, err := f.render(target)
 		if err != nil {
 			variables[i].Default = DefaultInfo{State: DefaultUnrenderable}
-			problems = append(problems, ManifestProblem{Kind: ErrorDefaultRender, InstanceName: d.instanceName, VariableName: f.Name, FieldPath: f.field})
+			problems = append(problems, ManifestProblem{
+				Kind:         ErrorDefaultRender,
+				InstanceName: d.instanceName,
+				VariableName: f.Name,
+				FieldPath:    f.field,
+			})
 		} else {
 			variables[i].Default = DefaultInfo{State: DefaultRendered, Text: text}
 		}
@@ -42,7 +47,7 @@ func evaluateDefaults(d descriptor, variables []Variable) []ManifestProblem {
 	return problems
 }
 func setDefaults[T any](cfg *T) {
-	if d, ok := any(cfg).(interface{ SetDefaults() }); ok {
+	if d, isOK := any(cfg).(interface{ SetDefaults() }); isOK {
 		d.SetDefaults()
 	}
 }
