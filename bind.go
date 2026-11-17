@@ -23,7 +23,8 @@ type fieldSpec struct {
 }
 
 // prepareConfig validates registration options and compiles the schema before
-// any config methods run. Loading and manifest generation use the same path.
+// defaults or validation run. EnvPrefix may run while resolving options.
+// Loading and manifest generation use the same path.
 func prepareConfig[T any](name string, opts []ConfigOption) (configSettings, []fieldSpec, error) {
 	settings, err := resolveSettings[T](name, opts)
 	if err != nil {

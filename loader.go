@@ -95,13 +95,19 @@ func MakeLoader(opts ...LoaderOption) *Loader {
 }
 
 // Register registers a struct config of type T and returns its [Handle].
-// The required name labels errors. Custom engines accept any nonempty unique name.
-// With the built-in engine, the name determines the default ENV prefix:
-// "read-replica" reads READ_REPLICA_*. [WithPrefix] overrides only the prefix.
-// Names must be non-empty, contain only lowercase letters, digits, _ - .,
-// and start and end with a letter or digit.
+// Custom engines require a nonempty unique name and do not call EnvPrefix.
+// With the built-in engine, T may implement EnvPrefix() string on a value or
+// pointer receiver. The method runs on a fresh zero value during registration,
+// before defaults, and must be deterministic and safe for concurrent calls.
+// Panics propagate and the registration is not added.
+// An empty name derives identity from the lowercase prefix without its final
+// underscore. Otherwise the normalized name prefix is prepended, unless it
+// exactly equals the type prefix. Without the method, explicit names retain
+// their existing prefixes. WithPrefix overrides the complete ENV prefix;
+// a named override does not call EnvPrefix.
+// Names contain lowercase letters, digits, _ - . and start/end with a letter or digit.
 //
-// An invalid registration, such as an empty name or bad tag, is reported by
+// An invalid registration, such as a missing name without a type prefix or a bad tag, is reported by
 // [Loader.Load] or [Loader.Manifest]. Once Load has started, Register
 // registers nothing and calls no method of T; the handle's Value returns
 // [ErrRegisteredAfterLoad].
@@ -121,6 +127,10 @@ func (l *Loader) Register[T any](name string, opts ...ConfigOption) *Handle[T] {
 		r.descriptor, r.err = makeEngineDescriptor[T](name, opts)
 	} else {
 		r.descriptor, r.err = makeDescriptor[T](name, opts)
+	}
+	if len(r.instanceName) != 0 {
+		name = r.instanceName
+		r.name = name
 	}
 	// Handles, including copies, share typed storage. Value exposes it only
 	// after Load publishes completion under the loader mutex.
@@ -283,7 +293,7 @@ func (l *Loader) LoadContext(ctx context.Context) error {
 }
 
 // Load loads one config of type T, as a [Loader] with a single registration would.
-// The required name determines the default ENV prefix. Options include
+// An empty name uses the type prefix as described by Loader.Register. Options include
 // [ConfigOption] ([WithPrefix]) and [LoaderOption]
 // ([WithEnv], [AllowUnknown], [WithDiagnostics],
 // [WithDiagnosticHandler]). Unknown variables are looked for under
@@ -388,7 +398,7 @@ func (h *Handle[T]) Value() (T, error) {
 func makeDescriptor[T any](name string, opts []ConfigOption) (descriptor, error) {
 	set, fields, err := prepareConfig[T](name, opts)
 	if err != nil {
-		return descriptor{}, err
+		return descriptor{instanceName: set.name, prefix: set.prefix}, err
 	}
 
 	return descriptor{

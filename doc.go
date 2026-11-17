@@ -10,9 +10,12 @@
 //
 // # Loading lifecycle
 //
-// The loader checks declarations and conflicts, creates fresh defaults, fills
-// configurations and validates them. Only root SetDefaults and Validate methods run
-// automatically. All handles withhold their values unless the entire load succeeds.
+// Registration resolves declarations and may call the root EnvPrefix method
+// with the built-in engine; see [Loader.Register] for prefix resolution rules.
+// Loading checks conflicts, creates fresh defaults through the root SetDefaults
+// method when implemented, fills configurations, then calls root Validate when
+// implemented.
+// All handles withhold their values unless the entire load succeeds.
 // Loading happens once; later calls return the published result without reloading.
 // A registration made after loading starts is rejected.
 //
@@ -25,7 +28,9 @@
 //
 // Without [WithEngine], names derive ENV prefixes and tags select fields. For example,
 // registration "store" and env:"HOST" select STORE_HOST. [WithPrefix] overrides the
-// prefix. [WithEnv] copies a complete replacement environment; nil means empty ENV.
+// prefix. An optional EnvPrefix() string method declares a type prefix; see
+// [Loader.Register] for default names, composition and callback timing.
+// [WithEnv] copies a complete replacement environment; nil means empty ENV.
 // Otherwise the loader reads one process ENV snapshot.
 //
 // Present variables replace whole fields; missing variables retain defaults.

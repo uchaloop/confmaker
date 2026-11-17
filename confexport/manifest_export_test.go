@@ -196,7 +196,7 @@ func ExampleWriteJSON() {
 }
 
 func TestManifestMarkdownCode(t *testing.T) {
-	for _, value := range []string{"POSTGRES_HOST", "POSTGRES_", "[]string", "map[string]*int"} {
+	for _, value := range []string{"SERVICE_HOST", "SERVICE_", "[]string", "map[string]*int"} {
 		if got := manifestMarkdownCode(value); got != "`"+value+"`" {
 			t.Fatalf("identifier %q rendered as %q", value, got)
 		}

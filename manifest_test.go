@@ -63,10 +63,10 @@ func names(variables []Variable) []string {
 }
 
 func TestManifestListsVariablesInDeclarationOrder(t *testing.T) {
-	got := names(manifested[manifestConfig](t, "confxpostgres"))
+	got := names(manifested[manifestConfig](t, "confxservice"))
 
 	want := []string{
-		"CONFXPOSTGRES_HOST", "CONFXPOSTGRES_POOL_MAX_CONNS", "CONFXPOSTGRES_TIMEOUT", "CONFXPOSTGRES_PASSWORD",
+		"CONFXSERVICE_HOST", "CONFXSERVICE_POOL_MAX_CONNS", "CONFXSERVICE_TIMEOUT", "CONFXSERVICE_PASSWORD",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -81,11 +81,11 @@ func TestManifestListsVariablesInDeclarationOrder(t *testing.T) {
 
 func TestManifestReportsFieldMetadata(t *testing.T) {
 	byName := make(map[string]Variable)
-	for _, variable := range manifested[manifestConfig](t, "confxpostgres") {
+	for _, variable := range manifested[manifestConfig](t, "confxservice") {
 		byName[variable.Name] = variable
 	}
 
-	pool := byName["CONFXPOSTGRES_POOL_MAX_CONNS"]
+	pool := byName["CONFXSERVICE_POOL_MAX_CONNS"]
 	if pool.Default.Text != "2" || (pool.Default.State != DefaultRendered) {
 		t.Errorf("the default from SetDefaults was not reported: %+v", pool)
 	}
@@ -96,15 +96,15 @@ func TestManifestReportsFieldMetadata(t *testing.T) {
 
 	// A duration renders in duration syntax, so the default is text
 	// the variable could carry back.
-	if timeout := byName["CONFXPOSTGRES_TIMEOUT"]; timeout.Default.Text != "30s" {
+	if timeout := byName["CONFXSERVICE_TIMEOUT"]; timeout.Default.Text != "30s" {
 		t.Errorf("timeout default = %q, want 30s", timeout.Default.Text)
 	}
 
-	if host := byName["CONFXPOSTGRES_HOST"]; (host.Default.State == DefaultRendered) || host.Required || host.Secret {
+	if host := byName["CONFXSERVICE_HOST"]; (host.Default.State == DefaultRendered) || host.Required || host.Secret {
 		t.Errorf("a plain field without a default was misreported: %+v", host)
 	}
 
-	password := byName["CONFXPOSTGRES_PASSWORD"]
+	password := byName["CONFXSERVICE_PASSWORD"]
 	if !password.Required || password.NotEmpty || !password.Secret {
 		t.Errorf("the secret is not reported as required, possibly empty, and secret: %+v", password)
 	}
@@ -144,14 +144,14 @@ func TestManifestMatchesTheStrictCheck(t *testing.T) {
 	t.Parallel()
 
 	env := make(map[string]string)
-	for _, variable := range manifested[manifestConfig](t, "confxpostgres") {
+	for _, variable := range manifested[manifestConfig](t, "confxservice") {
 		env[variable.Name] = "1"
 	}
 
-	env["CONFXPOSTGRES_HOST"] = "db:5432"
-	env["CONFXPOSTGRES_TIMEOUT"] = "1s"
+	env["CONFXSERVICE_HOST"] = "db:5432"
+	env["CONFXSERVICE_TIMEOUT"] = "1s"
 
-	if _, err := Load[manifestConfig]("confxpostgres", WithEnv(env)); err != nil {
+	if _, err := Load[manifestConfig]("confxservice", WithEnv(env)); err != nil {
 		t.Fatalf("a variable the manifest lists was rejected by Load: %v", err)
 	}
 }
@@ -162,17 +162,17 @@ func TestManifestMatchesTheStrictCheck(t *testing.T) {
 func TestManifestRendersEnvExample(t *testing.T) {
 	var out strings.Builder
 
-	for _, variable := range manifested[manifestConfig](t, "confxpostgres") {
+	for _, variable := range manifested[manifestConfig](t, "confxservice") {
 		out.WriteString(variable.Name)
 		out.WriteString("=")
 		out.WriteString(variable.Default.Text)
 		out.WriteString("\n")
 	}
 
-	const want = "CONFXPOSTGRES_HOST=\n" +
-		"CONFXPOSTGRES_POOL_MAX_CONNS=2\n" +
-		"CONFXPOSTGRES_TIMEOUT=30s\n" +
-		"CONFXPOSTGRES_PASSWORD=\n"
+	const want = "CONFXSERVICE_HOST=\n" +
+		"CONFXSERVICE_POOL_MAX_CONNS=2\n" +
+		"CONFXSERVICE_TIMEOUT=30s\n" +
+		"CONFXSERVICE_PASSWORD=\n"
 
 	if out.String() != want {
 		t.Fatalf("rendered:\n%s\nwant:\n%s", out.String(), want)

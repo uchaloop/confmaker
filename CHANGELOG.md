@@ -4,7 +4,21 @@ All notable changes to this module are documented in this file.
 
 Entries are grouped by version and change type, with the newest version first.
 
-## [2.1.1] - 2026-11-04
+## [2.2.0] - 2026-11-17
+
+### Added
+
+- Optional EnvPrefix() string on configuration types, with inferred default names
+  and named-instance prefix composition in the built-in engine.
+- Loading, manifests and diagnostics share resolved configuration identities.
+
+### Compatibility
+
+- Existing types without EnvPrefix keep their explicit-name behavior. Adding the
+  method opts named registrations into composed prefixes; use WithPrefix to retain
+  a legacy prefix. Custom engines still require explicit names.
+
+## [2.1.1]
 
 ### Changed
 
@@ -470,4 +484,6 @@ its only dependencies.
 
 [2.1.0]: https://github.com/uchaloop/confmaker/compare/v2.0.0...v2.1.0
 
-[2.1.1]: https://github.com/uchaloop/confmaker/compare/v2.1.0...HEAD
+[2.1.1]: https://github.com/uchaloop/confmaker/compare/v2.1.0...v2.1.1
+[2.2.0]: https://github.com/uchaloop/confmaker/compare/v2.1.1...v2.2.0
+[Unreleased]: https://github.com/uchaloop/confmaker/compare/v2.2.0...HEAD

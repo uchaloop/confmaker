@@ -79,7 +79,7 @@ func TestManifestReportsAnInvalidDeclaration(t *testing.T) {
 func TestInstanceNameIsChecked(t *testing.T) {
 	t.Parallel()
 
-	rejected := []string{"", "my service", "Postgres", "_postgres", "postgres-", "pg/main"}
+	rejected := []string{"", "my service", "Service", "_service", "service-", "pg/main"}
 
 	for _, name := range rejected {
 		t.Run(name, func(t *testing.T) {
@@ -93,7 +93,7 @@ func TestInstanceNameIsChecked(t *testing.T) {
 		})
 	}
 
-	for _, name := range []string{"postgres", "read-replica", "daemon_card_publish", "db.main", "pg2"} {
+	for _, name := range []string{"service", "read-replica", "daemon_card_publish", "db.main", "pg2"} {
 		if err := checkName(name); err != nil {
 			t.Errorf("%q rejected: %v", name, err)
 		}
@@ -150,7 +150,7 @@ func TestConfigErrorLabelsEveryLine(t *testing.T) {
 	_, err := Load[struct {
 		Host string `env:"HOST,required"`
 		User string `env:"USER,required"`
-	}]("confxpostgres", WithPrefix("CONFXAPP_"), WithEnv(nil))
+	}]("confxservice", WithPrefix("CONFXAPP_"), WithEnv(nil))
 	if err == nil {
 		t.Fatal("expected both variables to be reported")
 	}
@@ -161,7 +161,7 @@ func TestConfigErrorLabelsEveryLine(t *testing.T) {
 	}
 
 	for _, line := range lines {
-		if !strings.HasPrefix(line, `config "confxpostgres":`) {
+		if !strings.HasPrefix(line, `config "confxservice":`) {
 			t.Errorf("line is not attributed to its config: %q", line)
 		}
 	}

@@ -139,7 +139,8 @@ func (l *Loader) Manifest(opts ...ManifestOption) (ManifestResult, error) {
 
 // Manifest describes one configuration with the same result model as Loader.Manifest.
 // Options may include ConfigOption values such as WithPrefix and ManifestOption
-// values such as IncludeDefaults. It does not load the configuration.
+// values such as IncludeDefaults. It resolves EnvPrefix during registration
+// but does not load the configuration or evaluate defaults unless requested.
 func Manifest[T any](name string, opts ...DescribeOption) (ManifestResult, error) {
 	var configs []ConfigOption
 	var manifests []ManifestOption

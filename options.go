@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 // LoadOption is an option [Load] takes: every [ConfigOption] and every
@@ -105,12 +106,30 @@ func resolveSettings[T any](name string, opts []ConfigOption) (configSettings, e
 		return set, fmt.Errorf("a config must be a struct, got %s", reflect.TypeFor[T]())
 	}
 
+	// Explicit named overrides do not evaluate the type's default prefix.
+	var typePrefix string
+	if !set.isPrefixSet || len(set.name) == 0 {
+		if source, isOK := any(new(T)).(interface{ EnvPrefix() string }); isOK {
+			typePrefix = source.EnvPrefix()
+			if err := checkPrefix(typePrefix); err != nil {
+				return set, err
+			}
+		}
+	}
+
+	if len(set.name) == 0 && len(typePrefix) != 0 {
+		set.name = strings.ToLower(strings.TrimSuffix(typePrefix, "_"))
+	}
+
 	if err := checkName(set.name); err != nil {
 		return set, err
 	}
 
 	if !set.isPrefixSet {
 		set.prefix = defaultPrefix(set.name)
+		if len(typePrefix) != 0 && set.prefix != typePrefix {
+			set.prefix += typePrefix
+		}
 	}
 
 	if err := checkPrefix(set.prefix); err != nil {

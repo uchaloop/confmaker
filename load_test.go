@@ -247,8 +247,8 @@ func TestNestedStructPrefix(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
-		"CONFXPOSTGRES_HOST":           "db:5432",
-		"CONFXPOSTGRES_POOL_MAX_CONNS": "4",
+		"CONFXSERVICE_HOST":           "db:5432",
+		"CONFXSERVICE_POOL_MAX_CONNS": "4",
 	}
 
 	type poolConfig struct {
@@ -258,13 +258,13 @@ func TestNestedStructPrefix(t *testing.T) {
 	got, err := Load[struct {
 		Host string     `env:"HOST"`
 		Pool poolConfig `envPrefix:"POOL_"`
-	}]("confxpostgres", WithEnv(env))
+	}]("confxservice", WithEnv(env))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
 	if got.Pool.MaxConns != 4 {
-		t.Fatalf("pool.max_conns = %d, want 4 from POSTGRES_POOL_MAX_CONNS", got.Pool.MaxConns)
+		t.Fatalf("pool.max_conns = %d, want 4 from SERVICE_POOL_MAX_CONNS", got.Pool.MaxConns)
 	}
 }
 
