@@ -20,14 +20,14 @@ func (c *strictConfig) SetDefaults() {
 	c.Port = 5432
 }
 
-// loadStrict loads the strictConfig instance "confxpostgres" from env.
+// loadStrict loads the strictConfig instance "confxservice" from env.
 func loadStrict(env map[string]string, opts ...LoaderOption) error {
 	loadOpts := []LoadOption{WithEnv(env)}
 	for _, opt := range opts {
 		loadOpts = append(loadOpts, opt)
 	}
 
-	if _, err := Load[strictConfig]("confxpostgres", loadOpts...); err != nil {
+	if _, err := Load[strictConfig]("confxservice", loadOpts...); err != nil {
 		return err
 	}
 
@@ -38,8 +38,8 @@ func TestCheckAcceptsDeclaredVariables(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
-		"CONFXPOSTGRES_HOST":     "db:5432",
-		"CONFXPOSTGRES_PASSWORD": "s3cr3t",
+		"CONFXSERVICE_HOST":     "db:5432",
+		"CONFXSERVICE_PASSWORD": "s3cr3t",
 	}
 
 	if err := loadStrict(env); err != nil {
@@ -51,9 +51,9 @@ func TestCheckRejectsTypoUnderOwnPrefix(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
-		"CONFXPOSTGRES_HOST":     "db:5432",
-		"CONFXPOSTGRES_PASSWORD": "s3cr3t",
-		"CONFXPOSTGRES_HSOT":     "typo",
+		"CONFXSERVICE_HOST":     "db:5432",
+		"CONFXSERVICE_PASSWORD": "s3cr3t",
+		"CONFXSERVICE_HSOT":     "typo",
 	}
 
 	err := loadStrict(env)
@@ -61,11 +61,11 @@ func TestCheckRejectsTypoUnderOwnPrefix(t *testing.T) {
 		t.Fatal("expected the typo to fail the load")
 	}
 
-	if !strings.Contains(err.Error(), "CONFXPOSTGRES_HSOT") {
+	if !strings.Contains(err.Error(), "CONFXSERVICE_HSOT") {
 		t.Fatalf("error does not name the variable: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), `did you mean "CONFXPOSTGRES_HOST"`) {
+	if !strings.Contains(err.Error(), `did you mean "CONFXSERVICE_HOST"`) {
 		t.Fatalf("error does not suggest the intended variable: %v", err)
 	}
 }
@@ -74,8 +74,8 @@ func TestCheckIgnoresForeignPrefixes(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
-		"CONFXPOSTGRES_HOST":     "db:5432",
-		"CONFXPOSTGRES_PASSWORD": "s3cr3t",
+		"CONFXSERVICE_HOST":     "db:5432",
+		"CONFXSERVICE_PASSWORD": "s3cr3t",
 		"KAFKA_BROKERS":          "not ours",
 	}
 
@@ -88,12 +88,12 @@ func TestAllowUnknownExemptsPrefix(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
-		"CONFXPOSTGRES_HOST":         "db:5432",
-		"CONFXPOSTGRES_PASSWORD":     "s3cr3t",
-		"CONFXPOSTGRES_EXPORTER_URL": "sidecar",
+		"CONFXSERVICE_HOST":         "db:5432",
+		"CONFXSERVICE_PASSWORD":     "s3cr3t",
+		"CONFXSERVICE_EXPORTER_URL": "sidecar",
 	}
 
-	if err := loadStrict(env, AllowUnknown("CONFXPOSTGRES_EXPORTER_")); err != nil {
+	if err := loadStrict(env, AllowUnknown("CONFXSERVICE_EXPORTER_")); err != nil {
 		t.Fatalf("exempted prefix still reported: %v", err)
 	}
 }
@@ -125,7 +125,7 @@ func TestInstanceWithoutPrefixIsRefused(t *testing.T) {
 	// instance with no prefix would claim the whole environment and is refused
 	// where it is declared.
 	loader := MakeLoader(WithEnv(nil))
-	loader.Register[strictConfig]("confxpostgres", WithPrefix(""))
+	loader.Register[strictConfig]("confxservice", WithPrefix(""))
 	err := loader.Load()
 	if err == nil {
 		t.Fatal("an instance with no prefix was accepted")
@@ -160,15 +160,15 @@ func TestAllowUnknownIgnoresEmptyPrefix(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
-		"CONFXPOSTGRES_HOST":     "db:5432",
-		"CONFXPOSTGRES_PASSWORD": "s3cr3t",
-		"CONFXPOSTGRES_HSOT":     "typo",
+		"CONFXSERVICE_HOST":     "db:5432",
+		"CONFXSERVICE_PASSWORD": "s3cr3t",
+		"CONFXSERVICE_HSOT":     "typo",
 	}
 
 	// An empty prefix matches everything; honouring it would turn the check off
 	// without saying so.
 	err := loadStrict(env, AllowUnknown(""))
-	if err == nil || !strings.Contains(err.Error(), "CONFXPOSTGRES_HSOT") {
+	if err == nil || !strings.Contains(err.Error(), "CONFXSERVICE_HSOT") {
 		t.Fatalf("an empty prefix silently disabled the check: %v", err)
 	}
 }

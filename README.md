@@ -122,6 +122,37 @@ and start/end with a letter or digit. `read-replica` produces `READ_REPLICA_`.
 full variable names must not conflict. `Handle.Name` and `Handle.BelongsTo`
 inspect identity without loading.
 
+### Default type prefixes
+
+A configuration may declare `func (StoreConfig) EnvPrefix() string { return "STORE_" }`.
+The built-in engine calls it on a fresh zero value before defaults. Value and
+pointer receivers are supported. The method must be deterministic, independent
+of environment/configuration values and safe for concurrent calls. Panics
+propagate; a failed callback adds no registration.
+
+| Registration | ENV prefix | Instance name |
+| --- | --- | --- |
+| `Register[StoreConfig]("")` | `STORE_` | `store` |
+| `Register[StoreConfig]("store")` | `STORE_` | `store` |
+| `Register[StoreConfig]("replica")` | `REPLICA_STORE_` | `replica` |
+| `Register[StoreConfig]("replica", WithPrefix("READ_"))` | `READ_` | `replica` |
+
+Only an exact normalized name-prefix match avoids duplication; there is no suffix
+matching. Explicit WithPrefix replaces the complete prefix, not the instance name.
+For a nonempty name it also bypasses EnvPrefix. An empty name still needs the type
+method to derive identity, even with WithPrefix. Prefixes must contain uppercase
+ASCII letters, digits or underscores and end in an underscore; inferred identities
+must also satisfy the instance-name rules above.
+
+The same rules apply to Load, LoadContext and the standalone Manifest function.
+Loader.Manifest reuses the resolved registration without calling EnvPrefix again.
+Types without this method keep explicit-name behavior; an empty name remains an
+error. Custom engines require explicit names and never invoke EnvPrefix.
+
+Adding EnvPrefix to an existing type changes its named-instance ENV keys. Existing
+users can retain an old prefix with WithPrefix; old and new keys are not read as
+fallbacks. Duplicate instances and prefixes remain errors.
+
 ## Built-in ENV engine
 
 | Declaration | Meaning |

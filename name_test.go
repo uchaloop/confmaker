@@ -14,13 +14,13 @@ func TestExplicitNameAndPrefix(t *testing.T) {
 
 	env := map[string]string{
 		"CONFXDEFAULT_HOST":          "primary",
-		"CONFXREPLICA_POSTGRES_HOST": "replica",
+		"CONFXREPLICA_SERVICE_HOST": "replica",
 		"CONFXCUSTOM_HOST":           "custom",
 	}
 
 	loader := MakeLoader(WithEnv(env))
 	primary := loader.Register[explicitNamedConfig]("confxdefault")
-	replica := loader.Register[explicitNamedConfig]("replica", WithPrefix("CONFXREPLICA_POSTGRES_"))
+	replica := loader.Register[explicitNamedConfig]("replica", WithPrefix("CONFXREPLICA_SERVICE_"))
 	custom := loader.Register[explicitNamedConfig]("confxcustom")
 	if err := loader.Load(); err != nil {
 		t.Fatal(err)
