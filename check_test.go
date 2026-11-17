@@ -76,7 +76,7 @@ func TestCheckIgnoresForeignPrefixes(t *testing.T) {
 	env := map[string]string{
 		"CONFXSERVICE_HOST":     "db:5432",
 		"CONFXSERVICE_PASSWORD": "s3cr3t",
-		"KAFKA_BROKERS":          "not ours",
+		"KAFKA_BROKERS":         "not ours",
 	}
 
 	if err := loadStrict(env); err != nil {
